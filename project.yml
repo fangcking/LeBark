@@ -1,0 +1,57 @@
+name: LeBark
+
+options:
+  bundleIdPrefix: com.lebark
+  deploymentTarget:
+    iOS: "15.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  SWIFT_VERSION: "5.9"
+  TARGETED_DEVICE_FAMILY: "1,2"
+  SUPPORTED_PLATFORMS: iphoneos
+
+targets:
+  LeBark:
+    type: application
+    platform: iOS
+    sources:
+      - path: LeBark
+    settings:
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lebark.app
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGNING_REQUIRED: NO
+          DEVELOPMENT_TEAM: ""
+          ENTITLEMENTS: LeBark/LeBark.entitlements
+          IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lebark.app
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGNING_REQUIRED: NO
+          DEVELOPMENT_TEAM: ""
+          ENTITLEMENTS: LeBark/LeBark.entitlements
+          IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    info:
+      path: LeBark/Info.plist
+      properties:
+        CFBundleDisplayName: 乐币BARK
+        CFBundleName: LeBark
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities:
+          - arm64
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        LSRequiresIPhoneOS: true
+        UIBackgroundModes:
+          - audio
+          - fetch
+        UIApplicationSupportsIndirectInputEvents: true

@@ -1,0 +1,58 @@
+name: Build TrollStore IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen and ldid
+        run: |
+          brew install xcodegen
+          brew install ldid
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build (unsigned, device SDK)
+        run: |
+          xcodebuild \
+            -project LeBark.xcodeproj \
+            -scheme LeBark \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+
+      - name: Ad-hoc sign and package IPA
+        run: |
+          set -e
+          APP=$(find ./DerivedData/Build/Products -type d -name 'LeBark.app' | head -n 1)
+          echo "APP=$APP"
+          test -n "$APP" && test -d "$APP"
+          rm -rf Payload LeBark.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          # 用 ldid 伪签名并写入自定义 entitlements（脱沙盒 + group.bark），
+          # TrollStore 安装时会原样保留这些权限，这样才能读取 BARK 的数据容器。
+          ldid -SLeBark/LeBark.entitlements Payload/LeBark.app/LeBark
+          ldid -e Payload/LeBark.app/LeBark
+          zip -qry LeBark.ipa Payload
+          ls -lh LeBark.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LeBark-TrollStore-IPA
+          path: LeBark.ipa
+          if-no-files-found: error
