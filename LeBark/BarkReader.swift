@@ -85,7 +85,7 @@ enum BarkReader {
         return result
     }
 
-    private static func messageKey(_ m: BarkMessage) -> String {
+    static func messageKey(_ m: BarkMessage) -> String {
         if !m.id.isEmpty { return "id:" + m.id }
         return "text:" + (m.title ?? "") + "|" + (m.body ?? "") + "|" + String(describing: m.createDate)
     }
@@ -248,10 +248,15 @@ enum BarkReader {
 extension LedgerStore {
     @discardableResult
     func importBarkMessages(_ messages: [BarkReader.BarkMessage]) -> IngestResult {
+        // 只处理没见过的消息。切后台回来/每 60 秒同步时 BARK 里 451 条旧消息
+        // 全部重复出现，若每次都重新解析会占满主线程，这是列表卡顿的根因。
+        let fresh = messages.filter { !importedBarkIDs.contains(BarkReader.messageKey($0)) }
         var total = IngestResult()
+        guard !fresh.isEmpty else { return total }
         var mismatchCount = 0
+        var seenNow = Set<String>()
         batch {
-            for m in messages {
+            for m in fresh {
                 let title = m.title ?? ""
                 let body = m.body ?? ""
                 guard !title.isEmpty || !body.isEmpty else { continue }
@@ -271,8 +276,10 @@ extension LedgerStore {
                 total.parsedPersons += r.parsedPersons
                 if r.hasMismatch { mismatchCount += 1 }
                 if !r.parsedServer.isEmpty { total.parsedServer = r.parsedServer }
+                seenNow.insert(BarkReader.messageKey(m))
             }
         }
+        importedBarkIDs.formUnion(seenNow)
         total.hasMismatch = mismatchCount > 0
         return total
     }

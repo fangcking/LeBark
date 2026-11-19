@@ -280,6 +280,10 @@ final class LedgerStore: ObservableObject {
     @Published var lastSyncAt: Date? = nil
     @Published var lastSyncDetail: String = ""
 
+    /// 已经处理过的 BARK 消息 key。切后台回来/每 60 秒同步时跳过它们，
+    /// 避免在主线程重复解析 451 条消息导致列表卡顿。
+    var importedBarkIDs: Set<String> = [] { didSet { persistIfNeeded() } }
+
     private var loaded = false
     private var batching = false
 
@@ -461,12 +465,14 @@ final class LedgerStore: ObservableObject {
         var summaries: [ServerSummary]
         var servers: [String]
         var barkGroup: String
+        var importedBarkIDs: [String]? = nil   // 老版本文件没有这个字段，兼容
     }
 
     private func persist() {
         guard loaded else { return }
         let snap = Snapshot(persons: persons, abnormals: abnormals,
-                            summaries: summaries, servers: servers, barkGroup: barkGroup)
+                            summaries: summaries, servers: servers, barkGroup: barkGroup,
+                            importedBarkIDs: Array(importedBarkIDs))
         // 主：Documents 目录下的 JSON（原子写入，防中断损坏）
         if let data = try? JSONEncoder().encode(snap), let url = Self.dataFileURL {
             try? data.write(to: url, options: .atomic)
@@ -490,6 +496,7 @@ final class LedgerStore: ObservableObject {
             summaries = snap.summaries
             servers = snap.servers
             barkGroup = snap.barkGroup
+            if let ids = snap.importedBarkIDs { importedBarkIDs = Set(ids) }
             return
         }
         // 兜底：读旧版 UserDefaults
