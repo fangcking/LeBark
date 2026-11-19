@@ -21,7 +21,7 @@ struct WeekView: View {
     }
     private var grouped: [(key: String, items: [CheckoutPerson])] {
         let keys = Array(Set(shown.map { $0.dateKey })).sorted()
-        return keys.map { (k, shown.filter { $0.dateKey == k }) }
+        return keys.map { k in (k, shown.filter { $0.dateKey == k }) }
     }
     private var totalAmount: Double { shown.reduce(0) { $0 + $1.amount } }
     private var serverKeys: [String] { Array(Set(weekPersons.map { $0.server })).sorted() }
@@ -194,7 +194,7 @@ struct WeekScreenshotView: View {
 
     private var grouped: [(key: String, items: [CheckoutPerson])] {
         let keys = Array(Set(persons.map { $0.dateKey })).sorted()
-        return keys.map { (k, persons.filter { $0.dateKey == k }) }
+        return keys.map { k in (k, persons.filter { $0.dateKey == k }) }
     }
 
     var body: some View {

@@ -145,7 +145,7 @@ final class PushHTTPServer: ObservableObject {
         // Content-Length：若 body 尚未收齐则返回 nil 继续读
         if let lenStr = headers["content-length"], let expected = Int(lenStr), expected > 0 {
             if bodyPart.utf8.count < expected { return nil }
-            bodyPart = String(bodyPart.utf8.prefix(expected))
+            bodyPart = String(decoding: bodyPart.utf8.prefix(expected), as: UTF8.self)
         }
 
         return HTTPReq(method: method, path: path, query: query, headers: headers, body: bodyPart)

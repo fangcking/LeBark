@@ -270,10 +270,10 @@ final class LedgerStore: ObservableObject {
     @Published var abnormals: [AbnormalRecord] = [] { didSet { persist() } }
     @Published var summaries: [ServerSummary] = [] { didSet { persist() } }
     @Published var servers: [String] = ["710", "2673", "201", "202", "203", "204", "205"] { didSet { persist() } }
-    @Published var serverPort: UInt16 = 8765 { didSet { UserDefaults.standard.set(Int(serverPort), forKey: kPort) } }
-    @Published var autoStartServer: Bool = true { didSet { UserDefaults.standard.set(autoStartServer, forKey: kAutoStart) } }
-    @Published var notifyOnPush: Bool = false { didSet { UserDefaults.standard.set(notifyOnPush, forKey: kNotify) } }
-    @Published var barkGroup: String = "乐币" { didSet { UserDefaults.standard.set(barkGroup, forKey: kBarkGroup) } }
+    @Published var serverPort: UInt16 = 8765 { didSet { UserDefaults.standard.set(Int(serverPort), forKey: Self.kPort) } }
+    @Published var autoStartServer: Bool = true { didSet { UserDefaults.standard.set(autoStartServer, forKey: Self.kAutoStart) } }
+    @Published var notifyOnPush: Bool = false { didSet { UserDefaults.standard.set(notifyOnPush, forKey: Self.kNotify) } }
+    @Published var barkGroup: String = "乐币" { didSet { UserDefaults.standard.set(barkGroup, forKey: Self.kBarkGroup) } }
     @Published var lastEvent: String = ""
 
     private var loaded = false
