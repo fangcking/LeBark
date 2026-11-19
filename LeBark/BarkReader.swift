@@ -70,10 +70,10 @@ enum BarkReader {
     private static func findBarkRealmURL() -> URL? {
         let fm = FileManager.default
         // 先试公共容器根目录下所有 App 容器
-        let roots = [
-            "/var/mobile/Containers/Data/Application",
-            NSHomeDirectory().deletingLastPathComponent  // 同级容器
-        ]
+        var roots = ["/var/mobile/Containers/Data/Application"]
+        // 同级容器目录（NSHomeDirectory 的上一级）
+        let homeParent = (NSHomeDirectory() as NSString).deletingLastPathComponent
+        if !roots.contains(homeParent) { roots.append(homeParent) }
         for root in roots {
             guard let dirs = try? fm.contentsOfDirectory(atPath: root) else { continue }
             for d in dirs {
