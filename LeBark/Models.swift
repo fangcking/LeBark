@@ -317,10 +317,12 @@ final class LedgerStore: ObservableObject {
             if personKeys.contains(p.dedupeKey) {
                 // 同名重复推送：更新金额/金币，不覆盖已结账状态
                 if let idx = persons.firstIndex(where: { $0.dedupeKey == p.dedupeKey }) {
-                    let wasChecked = persons[idx].checked
-                    let oldCheckedAt = persons[idx].checkedAt
-                    let oldNote = persons[idx].note
-                    p.checked = wasChecked; p.checkedAt = oldCheckedAt; p.note = oldNote
+                    // 保留原 id：UUID 变化会让 SwiftUI List 把同一行当成删除+插入，
+                    // 与确认弹窗/筛选切换叠加时会触发列表内部不一致而闪退
+                    p.id = persons[idx].id
+                    p.checked = persons[idx].checked
+                    p.checkedAt = persons[idx].checkedAt
+                    p.note = persons[idx].note
                     if persons[idx] != p {
                         persons[idx] = p
                         result.personsUpdated += 1
@@ -560,6 +562,12 @@ extension View {
 // MARK: - 日期工具
 
 enum DateUtil {
+    /// 月份 key：yyyy-MM，用于「本月」筛选
+    static func monthKey(of dateKey: String) -> String {
+        guard dateKey.count >= 7 else { return dateKey }
+        return String(dateKey.prefix(7))
+    }
+
     static func mondayKey(of dateKey: String) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         guard let d = f.date(from: dateKey) else { return dateKey }

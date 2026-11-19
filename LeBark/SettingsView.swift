@@ -91,6 +91,22 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .cardStyle()
 
+                    // 闪退诊断（仅异常时出现）
+                    if let crashLog = CrashLogger.read(), !crashLog.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("最近一次闪退记录", systemImage: "exclamationmark.triangle.fill")
+                                .font(.system(size: 13, weight: .semibold)).foregroundColor(.brandOrange)
+                            Text(crashLog)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.ink)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("清除记录") { CrashLogger.clear(); toast = "已清除" }
+                                .font(.system(size: 12, weight: .medium)).foregroundColor(.brandIndigo)
+                        }
+                        .cardStyle()
+                    }
+
                     // 数据管理
                     VStack(alignment: .leading, spacing: 10) {
                         Label("数据管理", systemImage: "externaldrive.fill")

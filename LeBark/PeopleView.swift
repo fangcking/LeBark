@@ -6,10 +6,11 @@ struct PeopleView: View {
     @State private var search = ""
     @State private var filter: Filter = .unchecked
     @State private var toast: String?
-    @State private var dateFilter: DateFilter = .all
+    // 默认显示本周：历史有几百条时，一进来只看本周，列表更轻量
+    @State private var dateFilter: DateFilter = .week
 
     enum Filter: String, CaseIterable { case unchecked = "未结账", checked = "已结账", all = "全部" }
-    enum DateFilter: String, CaseIterable { case all = "所有日期", today = "今天", week = "本周" }
+    enum DateFilter: String, CaseIterable { case week = "本周", month = "本月", today = "今天", all = "所有日期" }
 
     private var filtered: [CheckoutPerson] {
         var arr = store.persons
@@ -18,6 +19,9 @@ struct PeopleView: View {
         case .week:
             let wk = DateUtil.mondayKey(of: PushParser.todayKey())
             arr = arr.filter { DateUtil.mondayKey(of: $0.dateKey) == wk }
+        case .month:
+            let month = DateUtil.monthKey(of: PushParser.todayKey())
+            arr = arr.filter { DateUtil.monthKey(of: $0.dateKey) == month }
         case .all: break
         }
         if !search.isEmpty {

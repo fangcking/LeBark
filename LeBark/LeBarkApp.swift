@@ -8,6 +8,7 @@ struct LeBarkApp: App {
     @StateObject private var confirm = CheckConfirm()
 
     init() {
+        CrashLogger.install()
         Notifier.requestAuth()
     }
 
@@ -17,9 +18,9 @@ struct LeBarkApp: App {
                 .environmentObject(store)
                 .environmentObject(sync)
                 .environmentObject(confirm)
-                .checkConfirm(confirm)
                 .onAppear {
                     sync.attach(store)
+                    confirm.attach(store)
                     sync.start()
                 }
         }

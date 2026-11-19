@@ -1,71 +1,65 @@
 import SwiftUI
+import UIKit
 
-/// 结账状态变更的二次确认状态（三个页面共用）。
-/// 用 .environmentObject 注入，任意页面调用 request() 弹出确认框，避免误触。
+/// 结账状态变更的二次确认（三个页面共用）。
+///
+/// 用系统原生 UIAlertController，而不是 SwiftUI 的 .alert(item:)：
+/// .alert(item:) 挂在根视图上，弹窗出现/消失会重建整个 TabView + List，
+/// 在「确认后列表行立刻消失」的场景下会让 UITableView 内部状态不一致而闪退。
+/// 原生弹窗不参与 SwiftUI 视图树，配合「下一帧再改数据」可彻底避开。
 final class CheckConfirm: ObservableObject {
-    @Published var pending: Pending? = nil
+    weak var store: LedgerStore?
 
-    struct Pending: Identifiable {
-        let id = UUID()
-        let ids: Set<UUID>          // 受影响的人
-        let setChecked: Bool        // true=标记已结账，false=取消结账
-        let name: String            // 单人时显示名字；批量时为人数描述
-        let isBatch: Bool
-    }
+    func attach(_ store: LedgerStore) { self.store = store }
 
     /// 单人切换
     func request(person: CheckoutPerson) {
-        pending = Pending(ids: [person.id],
-                          setChecked: !person.checked,
-                          name: person.name,
-                          isBatch: false)
+        let checked = !person.checked
+        present(title: checked ? "确认标记为已结账？" : "确认取消结账？",
+                message: "「\(person.name)」\(checked ? "标记为已结账" : "改回未结账")",
+                ids: [person.id], setChecked: checked)
     }
 
     /// 批量设置
     func request(ids: Set<UUID>, checked: Bool) {
         guard !ids.isEmpty else { return }
-        pending = Pending(ids: ids,
-                          setChecked: checked,
-                          name: "\(ids.count) 人",
-                          isBatch: true)
+        present(title: checked ? "确认标记为已结账？" : "确认取消结账？",
+                message: "将把 \(ids.count) 人\(checked ? "标记为已结账" : "改回未结账")",
+                ids: ids, setChecked: checked)
     }
 
-    func cancel() { pending = nil }
-}
+    private func present(title: String, message: String, ids: Set<UUID>, setChecked: Bool) {
+        guard let vc = Self.topViewController(), vc.presentedViewController == nil else { return }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
 
-// MARK: - 通用的确认弹窗 modifier（挂在 TabView 根上，一处覆盖全部页面）
+        let confirmTitle = setChecked ? "确认结账" : "确认取消"
+        alert.addAction(UIAlertAction(title: confirmTitle, style: .default) { [weak self] _ in
+            guard let store = self?.store else { return }
+            // 弹窗已 dismiss，下一帧再改数据，避免列表刷新与弹窗动画叠加
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                store.setChecked(ids, checked: setChecked)
+            }
+        })
+        vc.present(alert, animated: true)
+    }
 
-struct CheckConfirmModifier: ViewModifier {
-    @EnvironmentObject private var store: LedgerStore
-    @ObservedObject var confirm: CheckConfirm
-
-    func body(content: Content) -> some View {
-        content.alert(item: $confirm.pending) { p in
-            Alert(
-                title: Text(p.setChecked ? "确认标记为已结账？" : "确认取消结账？"),
-                message: Text(p.isBatch
-                    ? "将把 \(p.name) \(p.setChecked ? "标记为已结账" : "改回未结账")"
-                    : "「\(p.name)」\(p.setChecked ? "标记为已结账" : "改回未结账")"),
-                primaryButton: .default(Text(p.setChecked ? "确认结账" : "确认取消")) {
-                    // 先关弹窗，再改数据。SwiftUI 在弹窗 dismiss 的同一帧里删除
-                    // 列表行（已结账列表取消勾选时行会消失）会触发 UITableView
-                    // 内部不一致而闪退，延后一帧即可彻底避开。
-                    confirm.pending = nil
-                    let ids = p.ids, checked = p.setChecked
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                        store.setChecked(ids, checked: checked)
-                    }
-                },
-                secondaryButton: .cancel(Text("取消")) {
-                    confirm.pending = nil
-                }
-            )
+    private static func topViewController(base: UIViewController? = nil) -> UIViewController? {
+        let root: UIViewController?
+        if let base = base {
+            root = base
+        } else {
+            let scenes = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+            let window = scenes.flatMap { $0.windows }.first { $0.isKeyWindow }
+            root = window?.rootViewController
         }
-    }
-}
-
-extension View {
-    func checkConfirm(_ confirm: CheckConfirm) -> some View {
-        modifier(CheckConfirmModifier(confirm: confirm))
+        guard let vc = root else { return nil }
+        if let nav = vc as? UINavigationController { return topViewController(base: nav.visibleViewController) }
+        if let tab = vc as? UITabBarController, let selected = tab.selectedViewController {
+            return topViewController(base: selected)
+        }
+        if let presented = vc.presentedViewController { return topViewController(base: presented) }
+        return vc
     }
 }
