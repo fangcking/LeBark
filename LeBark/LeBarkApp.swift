@@ -6,6 +6,7 @@ struct LeBarkApp: App {
     @StateObject private var store = LedgerStore()
     @StateObject private var sync = SyncManager.shared
     @StateObject private var confirm = CheckConfirm()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         CrashLogger.install()
@@ -22,6 +23,9 @@ struct LeBarkApp: App {
                     sync.attach(store)
                     confirm.attach(store)
                     sync.start()
+                }
+                .onChange(of: scenePhase) { phase in
+                    if phase == .background { store.flush() }
                 }
         }
     }

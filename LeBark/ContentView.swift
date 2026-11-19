@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var store: LedgerStore
-    @EnvironmentObject private var sync: SyncManager
+    // 这里不要声明 @EnvironmentObject：本视图并不读取 store/sync。
+    // 一旦声明，store 或同步状态每次变化都会重建整个 TabView，
+    // 连带结账名单全量过滤排序几千条记录，切页/同步时明显卡顿。
+    // store/sync 已在 LeBarkApp 注入环境，各子视图各自声明即可正常访问。
 
     var body: some View {
         TabView {

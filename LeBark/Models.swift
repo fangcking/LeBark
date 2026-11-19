@@ -276,9 +276,14 @@ final class LedgerStore: ObservableObject {
     @Published var summaries: [ServerSummary] = [] { didSet { persistIfNeeded() } }
     @Published var servers: [String] = ["710", "2673", "201", "202", "203", "204", "205"] { didSet { persistIfNeeded() } }
     @Published var barkGroup: String = "乐币" { didSet { persistIfNeeded() } }
-    @Published var lastEvent: String = ""
-    @Published var lastSyncAt: Date? = nil
-    @Published var lastSyncDetail: String = ""
+
+    // 同步状态不放 @Published：每 60 秒 / 每次回前台都会写这几个字段，
+    // 一旦 @Published 就会让所有观察 store 的页面（尤其结账名单）body 重建、
+    // 全量过滤排序几千条记录，这是「切过去就卡」「来回切卡」的主因。
+    // 它们只用于打开页面时读一次最新值，不需要实时驱动刷新。
+    var lastEvent: String = ""
+    var lastSyncAt: Date? = nil
+    var lastSyncDetail: String = ""
 
     /// 已经处理过的 BARK 消息 key。切后台回来/每 60 秒同步时跳过它们，
     /// 避免在主线程重复解析 451 条消息导致列表卡顿。
@@ -453,6 +458,7 @@ final class LedgerStore: ObservableObject {
     private static let kSummaries = "lebark.summaries"
     private static let kServers = "lebark.servers"
     private static let kBarkGroup = "lebark.barkgroup"
+    private static let kSnapshot = "lebark.snapshot"
 
     /// 数据文件放在 App 的 Documents 目录：TrollStore 覆盖安装（更新 App）时 bundle id 不变，
     /// 容器不会删除，文件与 UserDefaults 都会保留；这里额外落一份 JSON，方便备份/迁移。
@@ -470,22 +476,40 @@ final class LedgerStore: ObservableObject {
         var importedBarkIDs: [String]? = nil   // 老版本文件没有这个字段，兼容
     }
 
+    /// 写盘串行队列：编码 + 原子写全部在后台，绝不阻塞主线程
+    private let persistQueue = DispatchQueue(label: "lebark.persist")
+    private var pendingPersist: DispatchWorkItem?
+
+    /// 主线程只捕获值快照（数组是值类型，捕获后与后续修改互不影响），
+    /// 编码和写盘丢到后台队列，并合并连续调用：勾选一条不再卡住 UI。
     private func persist() {
         guard loaded else { return }
         let snap = Snapshot(persons: persons, abnormals: abnormals,
                             summaries: summaries, servers: servers, barkGroup: barkGroup,
                             importedBarkIDs: Array(importedBarkIDs))
-        // 主：Documents 目录下的 JSON（原子写入，防中断损坏）
-        if let data = try? JSONEncoder().encode(snap), let url = Self.dataFileURL {
-            try? data.write(to: url, options: .atomic)
+        pendingPersist?.cancel()
+        let work = DispatchWorkItem { [snap] in
+            guard let data = try? JSONEncoder().encode(snap) else { return }
+            if let url = Self.dataFileURL { try? data.write(to: url, options: .atomic) }
+            // 兜底镜像只写一份完整快照（原来要编码 4 次 + 写 5 个键）
+            UserDefaults.standard.set(data, forKey: Self.kSnapshot)
         }
-        // 镜像：UserDefaults（兼容旧逻辑，作为兜底）
-        let d = UserDefaults.standard
-        if let data = try? JSONEncoder().encode(persons) { d.set(data, forKey: Self.kPersons) }
-        if let data = try? JSONEncoder().encode(abnormals) { d.set(data, forKey: Self.kAbnormals) }
-        if let data = try? JSONEncoder().encode(summaries) { d.set(data, forKey: Self.kSummaries) }
-        d.set(servers, forKey: Self.kServers)
-        d.set(barkGroup, forKey: Self.kBarkGroup)
+        pendingPersist = work
+        persistQueue.async(execute: work)
+    }
+
+    /// App 退到后台前调用：把尚未落盘的改动同步写完，避免被系统杀掉丢数据
+    func flush() {
+        guard loaded else { return }
+        pendingPersist?.cancel()
+        let snap = Snapshot(persons: persons, abnormals: abnormals,
+                            summaries: summaries, servers: servers, barkGroup: barkGroup,
+                            importedBarkIDs: Array(importedBarkIDs))
+        persistQueue.sync {
+            guard let data = try? JSONEncoder().encode(snap) else { return }
+            if let url = Self.dataFileURL { try? data.write(to: url, options: .atomic) }
+            UserDefaults.standard.set(data, forKey: Self.kSnapshot)
+        }
     }
 
     private func load() {
@@ -501,8 +525,19 @@ final class LedgerStore: ObservableObject {
             if let ids = snap.importedBarkIDs { importedBarkIDs = Set(ids) }
             return
         }
-        // 兜底：读旧版 UserDefaults
+        // 兜底 1：新版单键快照（Documents 文件万一丢失时）
         let d = UserDefaults.standard
+        if let data = d.data(forKey: Self.kSnapshot),
+           let snap = try? JSONDecoder().decode(Snapshot.self, from: data) {
+            persons = snap.persons
+            abnormals = snap.abnormals
+            summaries = snap.summaries
+            servers = snap.servers
+            barkGroup = snap.barkGroup
+            if let ids = snap.importedBarkIDs { importedBarkIDs = Set(ids) }
+            return
+        }
+        // 兜底 2：读更老版本的多键 UserDefaults
         if let data = d.data(forKey: Self.kPersons),
            let arr = try? JSONDecoder().decode([CheckoutPerson].self, from: data) { persons = arr }
         if let data = d.data(forKey: Self.kAbnormals),
@@ -566,6 +601,13 @@ enum DateUtil {
     static func monthKey(of dateKey: String) -> String {
         guard dateKey.count >= 7 else { return dateKey }
         return String(dateKey.prefix(7))
+    }
+
+    /// 日期 key 加减天数（只调用一次，不要放进逐行 filter）
+    static func dateKey(_ key: String, addingDays days: Int) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: key) else { return key }
+        return f.string(from: Calendar.current.date(byAdding: .day, value: days, to: d) ?? d)
     }
 
     static func mondayKey(of dateKey: String) -> String {

@@ -12,13 +12,20 @@ struct PeopleView: View {
     enum Filter: String, CaseIterable { case unchecked = "未结账", checked = "已结账", all = "全部" }
     enum DateFilter: String, CaseIterable { case week = "本周", month = "本月", today = "今天", all = "所有日期" }
 
+    /// 过滤 + 排序。只在 body 开头调用一次。
+    /// 原来 body 里 6 处调用它，每处都对每条记录建一个 DateFormatter 算周一，
+    /// 几千条记录 × 6 次 = 数万次日期格式化，这是本页卡顿的首要原因。
     private var filtered: [CheckoutPerson] {
         var arr = store.persons
         switch dateFilter {
-        case .today: arr = arr.filter { $0.dateKey == PushParser.todayKey() }
+        case .today:
+            let t = PushParser.todayKey()
+            arr = arr.filter { $0.dateKey == t }
         case .week:
+            // yyyy-MM-dd 可直接按字符串比较；日期格式化只做 2 次，不进逐行 filter
             let wk = DateUtil.mondayKey(of: PushParser.todayKey())
-            arr = arr.filter { DateUtil.mondayKey(of: $0.dateKey) == wk }
+            let sun = DateUtil.dateKey(wk, addingDays: 6)
+            arr = arr.filter { $0.dateKey >= wk && $0.dateKey <= sun }
         case .month:
             let month = DateUtil.monthKey(of: PushParser.todayKey())
             arr = arr.filter { DateUtil.monthKey(of: $0.dateKey) == month }
@@ -43,15 +50,23 @@ struct PeopleView: View {
         }
     }
 
-    private var grouped: [(key: String, items: [CheckoutPerson])] {
-        let keys = Array(Set(filtered.map { $0.dateKey })).sorted(by: >)
-        return keys.map { k in (k, filtered.filter { $0.dateKey == k }) }
+    /// O(n) 分组，替代原来「每天 × 全量数组」的 O(n×天数) 双重遍历
+    private func grouped(_ rows: [CheckoutPerson]) -> [(key: String, items: [CheckoutPerson])] {
+        var buckets: [String: [CheckoutPerson]] = [:]
+        for p in rows { buckets[p.dateKey, default: []].append(p) }
+        return buckets.keys.sorted(by: >).compactMap { key in
+            guard let items = buckets[key] else { return nil }
+            return (key, items)
+        }
     }
 
-    private var allVisibleIDs: Set<UUID> { Set(filtered.map { $0.id }) }
-    private var currentAmount: Double { filtered.reduce(0) { $0 + $1.amount } }
-
     var body: some View {
+        // 一次算好，下面所有地方复用：过滤/排序/金额/分组/ID 集合只算一遍
+        let rows = filtered
+        let groups = grouped(rows)
+        let visibleIDs = Set(rows.map { $0.id })
+        let amount = rows.reduce(0) { $0 + $1.amount }
+
         NavigationView {
             VStack(spacing: 0) {
                 Picker("筛选", selection: $filter) {
@@ -66,7 +81,7 @@ struct PeopleView: View {
                     }
                     .pickerStyle(.menu)
                     Spacer()
-                    Text("\(filtered.count) 人 · ¥\(String(format: "%.2f", currentAmount))")
+                    Text("\(rows.count) 人 · ¥\(String(format: "%.2f", amount))")
                         .font(.system(size: 12.5, weight: .medium)).foregroundColor(.subtle)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -74,14 +89,14 @@ struct PeopleView: View {
                 // 始终使用 List 占满剩余空间：空结果也放进 List，避免普通 VStack
                 // 在 .searchable 下无法填满、search bar 下方出现白屏的问题。
                 List {
-                    if filtered.isEmpty {
+                    if rows.isEmpty {
                         Section {
                             emptyView
                                 .listRowBackground(Color(hex: "F5F7FC"))
                                 .listRowSeparator(.hidden)
                         }
                     } else {
-                        ForEach(grouped, id: \.key) { group in
+                        ForEach(groups, id: \.key) { group in
                             Section(header: sectionHeader(group)) {
                                 ForEach(group.items) { person in
                                     personRow(person)
@@ -90,8 +105,9 @@ struct PeopleView: View {
                         }
                     }
                 }
-                // 切换筛选/日期时重建列表，避免切换「已结账」后内容向下偏移的布局异常
-                .id("\(filter.rawValue)-\(dateFilter.rawValue)-\(search)")
+                // 只在切换筛选/日期时重建列表（修布局偏移）。
+                // 原来把 search 也放进来，导致搜索每输入一个字就重建整个列表 → 输入即卡。
+                .id("\(filter.rawValue)-\(dateFilter.rawValue)")
                 .listStyle(.insetGrouped)
                 .animation(nil, value: filter)
             }
@@ -103,20 +119,20 @@ struct PeopleView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
-                            confirm.request(ids: allVisibleIDs, checked: true)
+                            confirm.request(ids: visibleIDs, checked: true)
                         } label: {
                             Label("当前结果全部标记已结账", systemImage: "checkmark.circle")
                         }
                         Button {
-                            confirm.request(ids: allVisibleIDs, checked: false)
+                            confirm.request(ids: visibleIDs, checked: false)
                         } label: {
                             Label("当前结果取消结账标记", systemImage: "xmark.circle")
                         }
                         Divider()
                         Button {
-                            let names = filtered.map { $0.name }.joined(separator: "\n")
+                            let names = rows.map { $0.name }.joined(separator: "\n")
                             UIPasteboard.general.string = names
-                            toast = "已复制 \(filtered.count) 个名字"
+                            toast = "已复制 \(rows.count) 个名字"
                         } label: {
                             Label("复制当前所有名字", systemImage: "doc.on.doc")
                         }
