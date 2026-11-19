@@ -255,7 +255,7 @@ struct WeekScreenshotView: View {
                 .padding(20)
             }
             .background(Color.white.ignoresSafeArea())
-            .navigationTitle("截图视图")
+            // 截图专用页不显示标题，截图里只留日期 + 名单数据
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

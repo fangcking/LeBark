@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var store: LedgerStore
@@ -17,7 +18,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("BARK 自动同步", systemImage: "arrow.triangle.2.circlepath.circle.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-                        Text("进入 App 自动拉取一次，之后每 60 秒拉取一次。数据存进本 App，不受 BARK 快照 100 条截断限制，也不再需要局域网监听。")
+                        Text("进入 App 自动拉取一次，之后每 60 秒拉取一次。快照只有全局最近 100 条，想要完整历史：到 BARK「设置 → 导出/导入 → 导出」生成一次备份，本 App 会自动读到全部历史并入库（之后新推送由快照自动增量同步）。")
                             .font(.system(size: 11)).foregroundColor(.subtle)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -141,6 +142,7 @@ struct ImportView: View {
     @State private var dateKey = PushParser.todayKey()
     @State private var resultText = ""
     @State private var barkReading = false
+    @State private var showPicker = false
 
     var body: some View {
         NavigationView {
@@ -149,25 +151,11 @@ struct ImportView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("手动从 BARK 拉取「\(store.barkGroup)」分组", systemImage: "arrow.down.doc.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-                        Text("优先读 BARK 完整历史数据库（全量、不截断），失败时回退小组件快照。只取这个分组的汇总消息。")
+                        Text("自动扫描 BARK 官方导出的完整备份 JSON（全量、body 不截断），再用小组件快照补最新增量。只取这个分组的汇总消息。")
                             .font(.system(size: 11)).foregroundColor(.subtle)
                             .fixedSize(horizontal: false, vertical: true)
                         Button {
-                            barkReading = true
-                            let group = store.barkGroup
-                            DispatchQueue.global(qos: .userInitiated).async {
-                                let r = BarkReader.readAll(group: group)
-                                DispatchQueue.main.async {
-                                    barkReading = false
-                                    if let err = r.error {
-                                        resultText = "读取失败：\(err)"
-                                    } else {
-                                        let imported = store.importBarkMessages(r.messages)
-                                        let warn = imported.hasMismatch ? " ⚠️解析\(imported.parsedPersons)/声明\(imported.expectedAccounts)人" : ""
-                                        resultText = "从 \(r.source) 拉取 \(r.messages.count) 条 → 名单 +\(imported.personsAdded)，更新 \(imported.personsUpdated)，异常 +\(imported.abnormalsAdded)\(warn)"
-                                    }
-                                }
-                            }
+                            pullBark()
                         } label: {
                             HStack {
                                 if barkReading { ProgressView().progressViewStyle(.circular) }
@@ -179,6 +167,14 @@ struct ImportView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                         }
                         .buttonStyle(.plain).disabled(barkReading)
+
+                        Button { showPicker = true } label: {
+                            Label("从「文件」选择 BARK 备份 JSON", systemImage: "folder.badge.person.crop")
+                                .font(.system(size: 12.5, weight: .medium)).foregroundColor(.brandIndigo)
+                        }
+                        Text("如果自动扫描不到：在 BARK 设置里点「导出/导入 → 导出」并存储到文件，再用这里选中它；本 App 会长期保留这份备份。")
+                            .font(.system(size: 10.5)).foregroundColor(.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .cardStyle()
 
@@ -237,6 +233,34 @@ struct ImportView: View {
             .navigationTitle("导入")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("完成") { dismiss() } } }
+            .sheet(isPresented: $showPicker) {
+                JSONDocumentPicker { url in
+                    if BarkReader.savePickedBackup(from: url) {
+                        resultText = "备份已保存，正在导入…"
+                        pullBark()
+                    } else {
+                        resultText = "这个 JSON 不是 BARK 导出的备份格式。"
+                    }
+                }
+            }
+        }
+    }
+
+    private func pullBark() {
+        barkReading = true
+        let group = store.barkGroup
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = BarkReader.readAll(group: group)
+            DispatchQueue.main.async {
+                barkReading = false
+                if let err = r.error {
+                    resultText = "读取失败：\(err)"
+                } else {
+                    let imported = store.importBarkMessages(r.messages)
+                    let warn = imported.hasMismatch ? " ⚠️解析\(imported.parsedPersons)/声明\(imported.expectedAccounts)人" : ""
+                    resultText = "从 \(r.source) 拉取 \(r.messages.count) 条 → 名单 +\(imported.personsAdded)，更新 \(imported.personsUpdated)，异常 +\(imported.abnormalsAdded)\(warn)"
+                }
+            }
         }
     }
 
@@ -245,5 +269,33 @@ struct ImportView: View {
     }
     private func datePickerDate(from k: String) -> Date {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.date(from: k) ?? Date()
+    }
+}
+
+// MARK: - 选择 BARK 导出的 JSON 备份
+
+struct JSONDocumentPicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let vc = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.json], asCopy: true)
+        vc.delegate = context.coordinator
+        vc.allowsMultipleSelection = false
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let parent: JSONDocumentPicker
+        init(_ parent: JSONDocumentPicker) { self.parent = parent }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first { parent.onPick(url) }
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
 }

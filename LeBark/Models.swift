@@ -271,20 +271,35 @@ enum PushParser {
 // MARK: - 数据存储（本机持久化）
 
 final class LedgerStore: ObservableObject {
-    @Published var persons: [CheckoutPerson] = [] { didSet { persist() } }
-    @Published var abnormals: [AbnormalRecord] = [] { didSet { persist() } }
-    @Published var summaries: [ServerSummary] = [] { didSet { persist() } }
-    @Published var servers: [String] = ["710", "2673", "201", "202", "203", "204", "205"] { didSet { persist() } }
-    @Published var barkGroup: String = "乐币" { didSet { persist() } }
+    @Published var persons: [CheckoutPerson] = [] { didSet { persistIfNeeded() } }
+    @Published var abnormals: [AbnormalRecord] = [] { didSet { persistIfNeeded() } }
+    @Published var summaries: [ServerSummary] = [] { didSet { persistIfNeeded() } }
+    @Published var servers: [String] = ["710", "2673", "201", "202", "203", "204", "205"] { didSet { persistIfNeeded() } }
+    @Published var barkGroup: String = "乐币" { didSet { persistIfNeeded() } }
     @Published var lastEvent: String = ""
     @Published var lastSyncAt: Date? = nil
     @Published var lastSyncDetail: String = ""
 
     private var loaded = false
+    private var batching = false
 
     init() {
         load()
         loaded = true
+    }
+
+    /// 一次导入几百条历史时，合并成一次写盘，避免主线程被反复 JSON 编码卡住
+    func batch(_ work: () -> Void) {
+        batching = true
+        defer {
+            batching = false
+            persist()
+        }
+        work()
+    }
+
+    private func persistIfNeeded() {
+        if !batching { persist() }
     }
 
     /// 接收一条推送并落库（去重）
@@ -395,10 +410,16 @@ final class LedgerStore: ObservableObject {
     }
 
     func setChecked(_ ids: Set<UUID>, checked: Bool) {
-        for idx in persons.indices where ids.contains(persons[idx].id) {
-            persons[idx].checked = checked
-            persons[idx].checkedAt = checked ? Date() : nil
+        guard !ids.isEmpty else { return }
+        // 一次性替换数组：原来逐个下标修改会让 @Published 连续触发多次，
+        // 列表正在刷新时重复写盘/重绘是已结账页取消勾选闪退的诱因之一。
+        var next = persons
+        let now = Date()
+        for idx in next.indices where ids.contains(next[idx].id) {
+            next[idx].checked = checked
+            next[idx].checkedAt = checked ? now : nil
         }
+        persons = next
     }
 
     func deletePerson(_ person: CheckoutPerson) {

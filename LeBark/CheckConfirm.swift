@@ -47,8 +47,14 @@ struct CheckConfirmModifier: ViewModifier {
                     ? "将把 \(p.name) \(p.setChecked ? "标记为已结账" : "改回未结账")"
                     : "「\(p.name)」\(p.setChecked ? "标记为已结账" : "改回未结账")"),
                 primaryButton: .default(Text(p.setChecked ? "确认结账" : "确认取消")) {
-                    store.setChecked(p.ids, checked: p.setChecked)
+                    // 先关弹窗，再改数据。SwiftUI 在弹窗 dismiss 的同一帧里删除
+                    // 列表行（已结账列表取消勾选时行会消失）会触发 UITableView
+                    // 内部不一致而闪退，延后一帧即可彻底避开。
                     confirm.pending = nil
+                    let ids = p.ids, checked = p.setChecked
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        store.setChecked(ids, checked: checked)
+                    }
                 },
                 secondaryButton: .cancel(Text("取消")) {
                     confirm.pending = nil
