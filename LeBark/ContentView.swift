@@ -29,7 +29,7 @@ struct ToastModifier: ViewModifier {
     @Binding var message: String?
     func body(content: Content) -> some View {
         content.overlay(alignment: .bottom) {
-            if let message {
+            if let message = message {
                 Text(message)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(.white)
