@@ -1,16 +1,19 @@
 import Foundation
-import RealmSwift
 
 // MARK: - 读取 BARK 历史消息（巨魔环境，按分组过滤）
 //
 // BARK 存储机制（来自官方源码 Finb/Bark，已核对 master 分支）：
-// 1) 完整历史：BARK 主 App 沙盒 Documents/bark.realm（Realm，schemaVersion 19，未加密）
-//    每条 Message 字段：id / title / body / group / createDate / expireDate
-// 2) 小组件快照：App Group group.bark 下 recent_messages_snapshot.json
-//    仅最近 100 条，且 body 被截断到 500 字符 → 这就是「只能拉到 2 天」的根因
+//   小组件快照：App Group group.bark 下 recent_messages_snapshot.json
+//   每条含 title / body / group / createDate，字段规整，可精确按分组过滤。
 //
-// 策略：优先读完整 Realm（全历史，不截断）→ 按 group 过滤 → 解析入库；
-//       Realm 读取失败时回退到快照。我们自己的库持续累积，不受两者条数限制。
+// 为什么不用 RealmSwift 读完整历史：
+//   RealmSwift 静态库在本 App 的 TrollStore 伪签名（ldid）环境下会在启动阶段崩溃（闪退）。
+//   且从 Realm 二进制里无法可靠还原 group 与 createDate（二进制时间戳），
+//   强行提取会把历史消息日期归错。因此改为纯 Foundation 读快照，零第三方依赖。
+//
+// 数据完整性靠「自动同步 + 本地持久累积」保障：
+//   SyncManager 每 60 秒拉一次，快照里最近 100 条会不断被拉进我们自己的库并永久保存，
+//   不受快照滚动覆盖影响。 installs 越久，本地历史越全。
 
 enum BarkReader {
 
@@ -31,115 +34,14 @@ enum BarkReader {
 
     private static let appGroup = "group.bark"
     private static let snapshotName = "recent_messages_snapshot.json"
-    private static let barkBundleID = "me.fin.bark"
 
-    // MARK: 对外入口：先 Realm，失败回退快照
-
+    /// 对外入口：读 BARK 快照，按分组过滤
     static func readAll(group: String) -> ReadResult {
-        let realmResult = readRealm(group: group)
-        if realmResult.error == nil, !realmResult.messages.isEmpty {
-            return realmResult
-        }
-        let snapResult = readSnapshot(group: group, fallbackGroups: realmResult.availableGroups)
-        if !snapResult.messages.isEmpty { return snapResult }
-        // 两路都没数据：给出更完整的错误说明
-        var r = realmResult
-        if let se = snapResult.error { r.error = se }
-        else if r.error == nil { r.error = "没有读到「\(group)」分组的消息。" }
-        return r
+        readSnapshot(group: group)
     }
 
-    // MARK: 路径 A —— 完整 Realm
-
-    /// 与 BARK 的 Message 表结构保持一致（只读打开，不写）
-    private class BarkRealmMessage: Object {
-        @Persisted(primaryKey: true) var id: String = ""
-        @Persisted var title: String?
-        @Persisted var subtitle: String?
-        @Persisted var body: String?
-        @Persisted var bodyType: String?
-        @Persisted var url: String?
-        @Persisted var image: String?
-        @Persisted var group: String?
-        @Persisted var createDate: Date?
-        @Persisted var expireDate: Date?
-        override static func primaryKey() -> String? { "id" }
-    }
-
-    /// 找到 BARK 容器里的 bark.realm 路径（脱沙盒后扫描 /var/mobile/Containers/Data/Application）
-    private static func findBarkRealmURL() -> URL? {
-        let fm = FileManager.default
-        // 先试公共容器根目录下所有 App 容器
-        var roots = ["/var/mobile/Containers/Data/Application"]
-        // 同级容器目录（NSHomeDirectory 的上一级）
-        let homeParent = (NSHomeDirectory() as NSString).deletingLastPathComponent
-        if !roots.contains(homeParent) { roots.append(homeParent) }
-        for root in roots {
-            guard let dirs = try? fm.contentsOfDirectory(atPath: root) else { continue }
-            for d in dirs {
-                let docs = "\(root)/\(d)/Documents/bark.realm"
-                if fm.fileExists(atPath: docs) { return URL(fileURLWithPath: docs) }
-                let groupOld = "\(root)/\(d)/Library/Application Support/bark.realm"
-                if fm.fileExists(atPath: groupOld) { return URL(fileURLWithPath: groupOld) }
-            }
-        }
-        // App Group 旧路径（老版本 BARK 曾把库放这里）
-        if let g = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
-            let old = g.appendingPathComponent("bark.realm")
-            if fm.fileExists(atPath: old.path) { return old }
-        }
-        return nil
-    }
-
-    private static func readRealm(group: String) -> ReadResult {
+    private static func readSnapshot(group: String) -> ReadResult {
         var result = ReadResult()
-        guard let url = findBarkRealmURL() else {
-            result.error = "未找到 BARK 数据库文件（bark.realm）。请确认 BARK 已安装且打开过一次。"
-            return result
-        }
-        var config = Realm.Configuration(fileURL: url, readOnly: true)
-        config.schemaVersion = 19
-        config.objectTypes = [BarkRealmMessage.self]
-        guard let realm = try? Realm(configuration: config) else {
-            result.error = "BARK 数据库打开失败（可能被 BARK 占用或版本不匹配），将尝试快照。"
-            return result
-        }
-
-        let all = realm.objects(BarkRealmMessage.self)
-        // 收集全部可用分组（用于错误提示）
-        var groups: [String] = []
-        for obj in all {
-            if let g = obj.group, !g.isEmpty, !groups.contains(g) { groups.append(g) }
-        }
-        result.availableGroups = groups
-
-        let target = group.trimmingCharacters(in: .whitespaces)
-        let matched = all.filter { obj in
-            guard let g = obj.group else { return false }
-            return g.trimmingCharacters(in: .whitespaces) == target
-        }
-        // 只要「今日汇总」类消息，按时间正序便于解析
-        let summaries = matched.filter { ($0.title ?? "").contains("汇总") }
-            .sorted { ($0.createDate ?? .distantPast) < ($1.createDate ?? .distantPast) }
-
-        for obj in summaries {
-            result.messages.append(BarkMessage(id: obj.id, title: obj.title, body: obj.body,
-                                               group: obj.group, createDate: obj.createDate))
-        }
-        if result.messages.isEmpty {
-            let list = groups.isEmpty ? "（BARK 里没有分组信息）" : groups.joined(separator: "、")
-            result.error = "BARK 数据库里没有「\(target)」分组的汇总消息。现有分组：\(list)。可在设置里改分组名。"
-        } else {
-            result.source = "BARK 完整历史 Realm · \(target) 分组（\(result.messages.count) 条）"
-        }
-        return result
-    }
-
-    // MARK: 路径 B —— 快照（兜底）
-
-    private static func readSnapshot(group: String, fallbackGroups: [String] = []) -> ReadResult {
-        var result = ReadResult()
-        result.availableGroups = fallbackGroups
         guard let groupURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroup
         ) else {
@@ -148,9 +50,9 @@ enum BarkReader {
         }
         let url = groupURL.appendingPathComponent(snapshotName)
         guard let data = try? Data(contentsOf: url),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let arr = obj["messages"] as? [[String: Any]] else {
-            result.error = "没读到 BARK 快照，且完整历史也不可用。请确认 BARK 有历史消息。"
+            result.error = "没读到 BARK 快照。请确认 BARK 已安装且有历史消息，本 App 用巨魔带 App Group 权限安装。"
             return result
         }
 
@@ -176,11 +78,11 @@ enum BarkReader {
 
         if matched.isEmpty {
             let list = result.availableGroups.isEmpty ? "（快照里没有分组信息）" : result.availableGroups.joined(separator: "、")
-            result.error = "快照里没有「\(target)」分组的汇总消息。现有分组：\(list)。"
+            result.error = "快照里没有「\(target)」分组的汇总消息。现有分组：\(list)。可在设置里改分组名。"
             return result
         }
         result.messages = matched
-        result.source = "BARK 小组件快照 · \(target) 分组（\(matched.count) 条，可能截断）"
+        result.source = "BARK 快照 · \(target) 分组（\(matched.count) 条）"
         return result
     }
 }

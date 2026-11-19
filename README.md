@@ -11,7 +11,7 @@
 这个 App：
 
 - **全自动同步**：进入 App 自动从 BARK 拉取一次，之后每 60 秒拉一次，**只拉「乐币」分组**（分组名可改），无需任何手动操作
-- **读完整历史**：优先读 BARK 的完整 Realm 数据库（全历史、不截断），不再受快照 100 条 / body 截断 500 字的限制
+- **本地持续累积**：每次拉取都把消息存进本 App 自己的库并永久累积，用得越久历史越全（BARK 快照本身只保留最近 100 条，但我们的库会不断把它拉过来存好）
 - **一键复制名字**：名单里点一下名字就复制，直接拿去搜人
 - **标记已结账**：点圆圈或左滑标记，实时看到谁没结
 - **人数校验**：把推送声明的「账号成功数」与解析出的人数比对，不一致时标红提示，避免解析遗漏
@@ -20,7 +20,7 @@
 
 ## 数据从哪来（全自动 + 兜底）
 
-1. **自动拉取（默认）**：进入 App 立即拉一次，每 60 秒再拉一次（进前台也拉）。数据源优先为 BARK 完整库 `Documents/bark.realm`，按 group 过滤；失败时回退到快照 `group.bark/recent_messages_snapshot.json`。数据存进本 App 后持续累积，不受 BARK 任何条数限制。
+1. **自动拉取（默认）**：进入 App 立即拉一次，每 60 秒再拉一次（进前台也拉）。数据源为 BARK 快照 `group.bark/recent_messages_snapshot.json`，按 group 过滤。数据存进本 App 后持续累积，快照滚动覆盖也不会丢我们已存的历史。
 2. **手动拉取（设置里）**：点「立即刷新」或「粘贴导入 → 拉取并导入」随时触发一次，失败时会列出 BARK 里现有的分组名供你核对。
 3. **粘贴导入（兜底）**：从 BARK 长按复制历史消息，粘贴进来，支持一次多条自动切分。
 
@@ -56,12 +56,14 @@
 
 BARK 官方源码（Finb/Bark）里，历史消息存两处：
 
-- 主 App 沙盒 `Documents/bark.realm`（Realm 数据库）
-- App Group `group.bark` 容器下 `recent_messages_snapshot.json`（最近 100 条消息快照，字段 title/body/group/createDate）
+- App Group `group.bark` 容器下 `recent_messages_snapshot.json`（最近 100 条消息快照，字段 title/body/group/createDate）——**本 App 读这个**
+- 主 App 沙盒 `Documents/bark.realm`（Realm 完整数据库）——不读（见下方说明）
 
 巨魔（TrollStore）允许 App 自带任意 entitlements。本 App 声明了：
 - `com.apple.security.application-groups = group.bark` → 可读共享容器里的快照 JSON
-- `com.apple.private.security.no-sandbox` + `platform-application` + `com.apple.private.security.storage.AppDataContainers` → 脱沙盒后可扫描并读取 BARK 的数据容器
+- `com.apple.private.security.no-sandbox` + `platform-application` + `com.apple.private.security.storage.AppDataContainers` → 脱沙盒权限
+
+> 为什么不读完整 Realm 库：引入 RealmSwift 静态库会让本 App 在巨魔伪签名环境下**启动即闪退**，且 Realm 二进制里的 `group`、`createDate` 无法可靠还原（会把历史日期归错）。因此改用零依赖的快照读取 + 本地持久累积方案。
 
 云编译脚本用 `ldid -S` 伪签名把这些权限写进 IPA，TrollStore 安装时原样保留。
 
@@ -100,6 +102,6 @@ python make_ios_icon.py
 ## 兼容性
 
 - 部署目标 iOS 15.0，用 NavigationView，兼容 iOS 15~18
-- 通过 SwiftPM 引入 RealmSwift（10.50+）读取 BARK 完整数据库
+- 零第三方依赖（不引入 RealmSwift 等二进制库，避免巨魔伪签名下启动闪退）；仅用 Foundation 读 BARK 快照
 - 需要巨魔（TrollStore）环境才能读取 BARK 数据；普通签名安装只能粘贴导入
 - 数据存 App Documents 目录的 `lebark_data.json`（并镜像到 UserDefaults），覆盖安装更新 App 不丢；不联网上传

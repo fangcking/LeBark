@@ -7,11 +7,6 @@ options:
   generateEmptyDirectories: true
   groupSortPosition: top
 
-packages:
-  Realm:
-    url: https://github.com/realm/realm-swift
-    from: "10.50.0"
-
 configs:
   Debug: debug
   Release: release
@@ -27,9 +22,6 @@ targets:
     platform: iOS
     sources:
       - path: LeBark
-    dependencies:
-      - package: Realm
-        product: RealmSwift
     settings:
       configs:
         Debug:
