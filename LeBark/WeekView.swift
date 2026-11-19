@@ -198,6 +198,7 @@ struct WeekScreenshotView: View {
     let mondayKey: String
     let persons: [CheckoutPerson]
     let mode: String
+    @State private var copied = false
 
     private var grouped: [(key: String, items: [CheckoutPerson])] {
         // 时间倒序：日期从新到旧，明细按位置/毫秒从大到小
@@ -209,6 +210,17 @@ struct WeekScreenshotView: View {
                 return a.name < b.name
             })
         }
+    }
+
+    /// 复制全部名单（文字内容不变：日期 + 名字 金币 ¥金额）
+    private func copyAll() {
+        let text = grouped.map { g in
+            "【\(DateUtil.fullCN(g.key))】\n"
+                + g.items.map { "\($0.name)  \($0.coins)  ¥\(String(format: "%.2f", $0.amount))" }.joined(separator: "\n")
+        }.joined(separator: "\n\n")
+        UIPasteboard.general.string = text
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
     }
 
     var body: some View {
@@ -251,25 +263,27 @@ struct WeekScreenshotView: View {
                         .background(Color(hex: "F7F8FC"))
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
+
+                    // 复制按钮放在所有卡片最后，不再占顶部工具栏位置
+                    Button { copyAll() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
+                            Text(copied ? "已复制" : "复制全部名单")
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.brandIndigo)
+                        .padding(.horizontal, 16).padding(.vertical, 9)
+                        .background(Color(hex: "F7F8FC"))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
                 .padding(20)
             }
             .background(Color.white.ignoresSafeArea())
             // 截图专用页不显示标题，截图里只留日期 + 名单数据
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        let text = grouped.map { g in
-                            "【\(DateUtil.fullCN(g.key))】\n"
-                                + g.items.map { "\($0.name)  \($0.coins)  ¥\(String(format: "%.2f", $0.amount))" }.joined(separator: "\n")
-                        }.joined(separator: "\n\n")
-                        UIPasteboard.general.string = text
-                    } label: {
-                        Image(systemName: "doc.on.doc").foregroundColor(.brandIndigo)
-                    }
-                }
-            }
         }
     }
 }
