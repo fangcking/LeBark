@@ -24,6 +24,7 @@ jobs:
 
       - name: Build (unsigned, device SDK)
         run: |
+          set +e
           xcodebuild \
             -project LeBark.xcodeproj \
             -scheme LeBark \
@@ -32,7 +33,15 @@ jobs:
             -derivedDataPath ./DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            clean build
+            clean build 2>&1 | tee build.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== 编译错误汇总（以下每行为标注）====="
+            grep -E "error:" build.log | sed 's/^/::error title=Swift编译错误::/' || true
+            echo "===== 完整日志最后 80 行 ====="
+            tail -n 80 build.log
+            exit "$STATUS"
+          fi
 
       - name: Ad-hoc sign and package IPA
         run: |
