@@ -19,6 +19,8 @@ struct LeBarkApp: App {
                 .environmentObject(store)
                 .environmentObject(sync)
                 .environmentObject(confirm)
+                // 始终使用浅色模式，不跟随系统深色模式（深色下固定色值会显示错乱）
+                .preferredColorScheme(.light)
                 .onAppear {
                     sync.attach(store)
                     confirm.attach(store)
