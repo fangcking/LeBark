@@ -2,6 +2,7 @@ import Foundation
 import Network
 import AVFoundation
 import UIKit
+import UserNotifications
 
 // MARK: - 内置 HTTP 推送服务（让 iPhone 自己充当 BARK）
 
@@ -324,6 +325,6 @@ enum Notifier {
         content.body = String(body.prefix(120))
         content.sound = .default
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(req, withContentHandler: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
     }
 }
