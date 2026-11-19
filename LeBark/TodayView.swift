@@ -268,6 +268,7 @@ struct TodayView: View {
 struct ServerDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: LedgerStore
+    @EnvironmentObject private var confirm: CheckConfirm
     let server: String
     let persons: [CheckoutPerson]
     let summary: ServerSummary?
@@ -303,8 +304,13 @@ struct ServerDetailView: View {
                 Section(header: Text("单账号明细（\(sorted.count)）")) {
                     ForEach(sorted) { p in
                         HStack(spacing: 10) {
-                            Image(systemName: p.checked ? "checkmark.circle.fill" : "circle")
-                                .foregroundColor(p.checked ? .brandGreen : .gray.opacity(0.4))
+                            Button {
+                                confirm.request(person: p)
+                            } label: {
+                                Image(systemName: p.checked ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(p.checked ? .brandGreen : .gray.opacity(0.4))
+                            }
+                            .buttonStyle(.plain)
                             VStack(alignment: .leading, spacing: 3) {
                                 CopyNameButton(name: p.name)
                                 Text("位置 \(p.position) · \(p.timeCode)ms · 金 \(p.coins)")

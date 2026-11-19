@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PeopleView: View {
     @EnvironmentObject private var store: LedgerStore
+    @EnvironmentObject private var confirm: CheckConfirm
     @State private var search = ""
     @State private var filter: Filter = .unchecked
     @State private var toast: String?
@@ -66,10 +67,16 @@ struct PeopleView: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
 
-                if filtered.isEmpty {
-                    emptyView
-                } else {
-                    List {
+                // 始终使用 List 占满剩余空间：空结果也放进 List，避免普通 VStack
+                // 在 .searchable 下无法填满、search bar 下方出现白屏的问题。
+                List {
+                    if filtered.isEmpty {
+                        Section {
+                            emptyView
+                                .listRowBackground(Color(hex: "F5F7FC"))
+                                .listRowSeparator(.hidden)
+                        }
+                    } else {
                         ForEach(grouped, id: \.key) { group in
                             Section(header: sectionHeader(group)) {
                                 ForEach(group.items) { person in
@@ -78,11 +85,11 @@ struct PeopleView: View {
                             }
                         }
                     }
-                    // 切换筛选/日期时重建列表，避免切换「已结账」后内容向下偏移的布局异常
-                    .id("\(filter.rawValue)-\(dateFilter.rawValue)-\(search)")
-                    .listStyle(.insetGrouped)
-                    .animation(nil, value: filter)
                 }
+                // 切换筛选/日期时重建列表，避免切换「已结账」后内容向下偏移的布局异常
+                .id("\(filter.rawValue)-\(dateFilter.rawValue)-\(search)")
+                .listStyle(.insetGrouped)
+                .animation(nil, value: filter)
             }
             .background(Color(hex: "F5F7FC").ignoresSafeArea())
             .navigationTitle("结账名单")
@@ -92,14 +99,12 @@ struct PeopleView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
-                            store.setChecked(allVisibleIDs, checked: true)
-                            toast = "已将当前 \(allVisibleIDs.count) 人标记为已结账"
+                            confirm.request(ids: allVisibleIDs, checked: true)
                         } label: {
                             Label("当前结果全部标记已结账", systemImage: "checkmark.circle")
                         }
                         Button {
-                            store.setChecked(allVisibleIDs, checked: false)
-                            toast = "已取消当前 \(allVisibleIDs.count) 人的结账标记"
+                            confirm.request(ids: allVisibleIDs, checked: false)
                         } label: {
                             Label("当前结果取消结账标记", systemImage: "xmark.circle")
                         }
@@ -133,7 +138,7 @@ struct PeopleView: View {
     private func personRow(_ p: CheckoutPerson) -> some View {
         HStack(spacing: 12) {
             Button {
-                store.toggleChecked(p)
+                confirm.request(person: p)
             } label: {
                 Image(systemName: p.checked ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
@@ -158,7 +163,7 @@ struct PeopleView: View {
         .contentShape(Rectangle())
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button {
-                store.toggleChecked(p)
+                confirm.request(person: p)
             } label: {
                 Label(p.checked ? "取消" : "结账", systemImage: p.checked ? "xmark" : "checkmark")
             }

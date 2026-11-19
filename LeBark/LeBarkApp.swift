@@ -5,6 +5,7 @@ import UserNotifications
 struct LeBarkApp: App {
     @StateObject private var store = LedgerStore()
     @StateObject private var sync = SyncManager.shared
+    @StateObject private var confirm = CheckConfirm()
 
     init() {
         Notifier.requestAuth()
@@ -15,6 +16,8 @@ struct LeBarkApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(sync)
+                .environmentObject(confirm)
+                .checkConfirm(confirm)
                 .onAppear {
                     sync.attach(store)
                     sync.start()

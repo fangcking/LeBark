@@ -71,18 +71,26 @@ enum BarkReader {
         }
 
         let target = group.trimmingCharacters(in: .whitespaces)
+        // 只按分组过滤，不再强制 title 含「汇总」——早期推送的标题格式可能不同，
+        // 交给 PushParser 逐行判断即可，避免把有效消息误丢。
         let matched = out.filter { m in
             guard let g = m.group else { return false }
-            return g.trimmingCharacters(in: .whitespaces) == target && (m.title ?? "").contains("汇总")
+            return g.trimmingCharacters(in: .whitespaces) == target
         }.sorted { ($0.createDate ?? .distantPast) < ($1.createDate ?? .distantPast) }
 
         if matched.isEmpty {
             let list = result.availableGroups.isEmpty ? "（快照里没有分组信息）" : result.availableGroups.joined(separator: "、")
-            result.error = "快照里没有「\(target)」分组的汇总消息。现有分组：\(list)。可在设置里改分组名。"
+            result.error = "快照里没有「\(target)」分组的消息。现有分组：\(list)。快照共 \(out.count) 条。可在设置里改分组名。"
             return result
         }
+        // 诊断：快照里该分组的条数、最早/最晚日期，便于判断历史是否被快照容量挤掉
+        let df = DateFormatter(); df.dateFormat = "MM-dd"
+        let dates = matched.compactMap { $0.createDate }.sorted()
+        let range = (dates.first, dates.last) != (nil, nil)
+            ? "\(df.string(from: dates.first!))~\(df.string(from: dates.last!))"
+            : "无日期"
         result.messages = matched
-        result.source = "BARK 快照 · \(target) 分组（\(matched.count) 条）"
+        result.source = "BARK 快照 · \(target) \(matched.count)/\(out.count) 条（最早~最新 \(range)）"
         return result
     }
 }
