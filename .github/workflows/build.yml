@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,3 +67,18 @@ jobs:
           name: LeBark-TrollStore-IPA
           path: LeBark.ipa
           if-no-files-found: error
+
+      - name: Publish IPA to GitHub Release (公开直链下载)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="lebark-latest"
+          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
+          git tag -f "$TAG" >/dev/null 2>&1 || true
+          git push -f origin "$TAG" >/dev/null 2>&1 || true
+          gh release create "$TAG" LeBark.ipa \
+            --title "乐币BARK（巨魔 IPA，自动编译）" \
+            --notes "每次推送自动更新。下载 LeBark.ipa 用巨魔安装。" \
+            --target "$GITHUB_SHA"
+          echo "IPA 直链： https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/LeBark.ipa"
