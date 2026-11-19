@@ -513,4 +513,14 @@ enum DateUtil {
         let w = Calendar.current.component(.weekday, from: d) - 1
         return "\(out.string(from: d)) \(wd[w])"
     }
+
+    /// 截图标题用：完整年月日 + 星期，如 2026年11月19日 周四
+    static func fullCN(_ dateKey: String) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: dateKey) else { return dateKey }
+        let out = DateFormatter(); out.dateFormat = "yyyy年M月d日"
+        let wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        let w = Calendar.current.component(.weekday, from: d) - 1
+        return "\(out.string(from: d)) \(wd[w])"
+    }
 }

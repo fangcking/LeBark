@@ -214,28 +214,49 @@ struct WeekScreenshotView: View {
                         .padding(.top, 6)
 
                         ForEach(grouped, id: \.key) { g in
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(DateUtil.displayCN(g.key))
-                                        .font(.system(size: 14, weight: .bold)).foregroundColor(.ink)
-                                    Spacer()
-                                    Text("\(g.items.count) 人").font(.system(size: 12)).foregroundColor(.subtle)
+                            VStack(alignment: .leading, spacing: 8) {
+                                // 每天单独标题：截图里一眼看出是哪一天的数据
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(DateUtil.fullCN(g.key))
+                                        .font(.system(size: 14.5, weight: .bold)).foregroundColor(.ink)
+                                    Text(g.key)
+                                        .font(.system(size: 10.5)).foregroundColor(.subtle).monospacedDigit()
                                 }
+
+                                // 明细只保留三项：名字 / 金币 / 需结账金额
+                                HStack(spacing: 6) {
+                                    Text("名字").font(.system(size: 10.5)).foregroundColor(.subtle)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("金币").font(.system(size: 10.5)).foregroundColor(.subtle)
+                                        .frame(width: 48, alignment: .trailing)
+                                    Text("需结账").font(.system(size: 10.5)).foregroundColor(.subtle)
+                                        .frame(width: 72, alignment: .trailing)
+                                }
+
                                 if showOnlyNames {
                                     Text(g.items.map { $0.name }.joined(separator: "、"))
                                         .font(.system(size: 14)).foregroundColor(.ink)
                                         .fixedSize(horizontal: false, vertical: true)
                                 } else {
                                     ForEach(g.items) { p in
-                                        HStack {
-                                            Text(p.name).font(.system(size: 14, weight: .medium)).foregroundColor(.ink)
-                                            Spacer()
-                                            Text("金\(p.coins) · ¥\(String(format: "%.2f", p.amount))")
-                                                .font(.system(size: 12)).foregroundColor(.subtle)
+                                        HStack(spacing: 6) {
+                                            Text(p.name)
+                                                .font(.system(size: 14, weight: .medium)).foregroundColor(.ink)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .lineLimit(1).minimumScaleFactor(0.7)
+                                            Text("\(p.coins)")
+                                                .font(.system(size: 13)).foregroundColor(.subtle)
+                                                .frame(width: 48, alignment: .trailing).monospacedDigit()
+                                            Text("¥\(String(format: "%.2f", p.amount))")
+                                                .font(.system(size: 13, weight: .semibold)).foregroundColor(.brandOrange)
+                                                .frame(width: 72, alignment: .trailing).monospacedDigit()
                                         }
-                                        .padding(.vertical, 3)
+                                        .padding(.vertical, 2.5)
                                     }
                                 }
+
+                                Text("共 \(g.items.count) 人 · 合计 ¥\(String(format: "%.2f", g.items.reduce(0) { $0 + $1.amount }))")
+                                    .font(.system(size: 10.5)).foregroundColor(.subtle)
                             }
                             .padding(14)
                             .background(Color(hex: "F7F8FC"))
@@ -256,7 +277,9 @@ struct WeekScreenshotView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         let text = grouped.map { g in
-                            "【\(DateUtil.displayCN(g.key))】\n" + g.items.map { "\($0.name) 金\($0.coins) ¥\(String(format: "%.2f", $0.amount))" }.joined(separator: "\n")
+                            "【\(DateUtil.fullCN(g.key))  \(g.key)】\n"
+                                + g.items.map { "\($0.name)  \($0.coins)  ¥\(String(format: "%.2f", $0.amount))" }.joined(separator: "\n")
+                                + "\n小计 \(g.items.count) 人 · ¥\(String(format: "%.2f", g.items.reduce(0) { $0 + $1.amount }))"
                         }.joined(separator: "\n\n")
                         UIPasteboard.general.string = text
                     } label: {
@@ -269,8 +292,9 @@ struct WeekScreenshotView: View {
                     Toggle("紧凑模式（只显示名字，一屏更多）", isOn: $showOnlyNames)
                         .font(.system(size: 13)).foregroundColor(.ink)
                         .padding(.horizontal, 16)
-                    Text("白底名单可直接截屏发群；点右上角复制文字版")
+                    Text("白底名单可直接截屏发群；每天日期已标在标题，明细仅含名字 / 金币 / 需结账金额")
                         .font(.system(size: 11.5)).foregroundColor(.subtle)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(.vertical, 12)
                 .background(Color(hex: "F5F7FC"))

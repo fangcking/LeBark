@@ -144,9 +144,6 @@ struct PeopleView: View {
                         .font(.system(size: 14, weight: .bold)).foregroundColor(.brandOrange).monospacedDigit()
                 }
                 HStack(spacing: 10) {
-                    Text("服 \(p.server)").font(.system(size: 11)).foregroundColor(.subtle)
-                    if !p.position.isEmpty { Text("位 \(p.position)").font(.system(size: 11)).foregroundColor(.subtle) }
-                    if !p.timeCode.isEmpty { Text("\(p.timeCode)ms").font(.system(size: 11)).foregroundColor(.subtle) }
                     Text("金 \(p.coins)").font(.system(size: 11)).foregroundColor(.subtle)
                     if p.checked { Text("已结账").font(.system(size: 11, weight: .medium)).foregroundColor(.brandGreen) }
                 }
