@@ -8,6 +8,9 @@ struct PeopleView: View {
     @State private var toast: String?
     // 默认显示本周：历史有几百条时，一进来只看本周，列表更轻量
     @State private var dateFilter: DateFilter = .week
+    // 多选模式：勾选若干人后批量改结账状态
+    @State private var selectionMode = false
+    @State private var selectedIDs: Set<UUID> = []
 
     enum Filter: String, CaseIterable { case unchecked = "未结账", checked = "已结账", all = "全部" }
     enum DateFilter: String, CaseIterable { case week = "本周", month = "本月", today = "今天", all = "所有日期" }
@@ -74,6 +77,13 @@ struct PeopleView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16).padding(.top, 8)
+                // 「全部」页不允许选择：切过去时自动退出多选
+                .onChange(of: filter) { newFilter in
+                    if newFilter == .all {
+                        selectionMode = false
+                        selectedIDs.removeAll()
+                    }
+                }
 
                 HStack(spacing: 8) {
                     Picker("日期", selection: $dateFilter) {
@@ -117,27 +127,43 @@ struct PeopleView: View {
             .searchable(text: $search, prompt: "搜名字 / 服务器 / 时间码")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            confirm.request(ids: visibleIDs, checked: true)
-                        } label: {
-                            Label("当前结果全部标记已结账", systemImage: "checkmark.circle")
+                    if selectionMode {
+                        HStack(spacing: 14) {
+                            Button {
+                                if selectedIDs.count == visibleIDs.count {
+                                    selectedIDs.removeAll()
+                                } else {
+                                    selectedIDs = visibleIDs
+                                }
+                            } label: {
+                                Image(systemName: selectedIDs.count == visibleIDs.count ? "square" : "checkmark.square")
+                                    .font(.system(size: 18)).foregroundColor(.brandIndigo)
+                            }
+                            // 统一改成「另一种状态」：未结账页→已结账，已结账页→未结账
+                            Button {
+                                confirm.request(ids: selectedIDs, checked: filter == .unchecked)
+                                selectionMode = false
+                                selectedIDs.removeAll()
+                            } label: {
+                                Text(filter == .unchecked ? "标记已结账" : "改回未结账")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.brandGreen)
+                            }
+                            .disabled(selectedIDs.isEmpty)
+                            Button("完成") {
+                                selectionMode = false
+                                selectedIDs.removeAll()
+                            }
+                            .font(.system(size: 14, weight: .medium))
                         }
+                    } else if filter != .all {
+                        // 「全部」页不提供批量改状态；未结账/已结账页点图标直接进入多选
                         Button {
-                            confirm.request(ids: visibleIDs, checked: false)
+                            selectionMode = true
+                            selectedIDs.removeAll()
                         } label: {
-                            Label("当前结果取消结账标记", systemImage: "xmark.circle")
+                            Image(systemName: "checkmark.circle").font(.system(size: 18)).foregroundColor(.brandIndigo)
                         }
-                        Divider()
-                        Button {
-                            let names = rows.map { $0.name }.joined(separator: "\n")
-                            UIPasteboard.general.string = names
-                            toast = "已复制 \(rows.count) 个名字"
-                        } label: {
-                            Label("复制当前所有名字", systemImage: "doc.on.doc")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle").font(.system(size: 18)).foregroundColor(.brandIndigo)
                     }
                 }
             }
@@ -156,13 +182,22 @@ struct PeopleView: View {
     }
 
     private func personRow(_ p: CheckoutPerson) -> some View {
-        HStack(spacing: 12) {
+        let isSelected = selectedIDs.contains(p.id)
+        return HStack(spacing: 12) {
             Button {
-                confirm.request(person: p)
+                if selectionMode {
+                    if isSelected { selectedIDs.remove(p.id) } else { selectedIDs.insert(p.id) }
+                } else {
+                    confirm.request(person: p)
+                }
             } label: {
-                Image(systemName: p.checked ? "checkmark.circle.fill" : "circle")
+                Image(systemName: selectionMode
+                      ? (isSelected ? "checkmark.circle.fill" : "circle")
+                      : (p.checked ? "checkmark.circle.fill" : "circle"))
                     .font(.system(size: 22))
-                    .foregroundColor(p.checked ? .brandGreen : Color.gray.opacity(0.45))
+                    .foregroundColor(selectionMode
+                        ? (isSelected ? .brandIndigo : Color.gray.opacity(0.45))
+                        : (p.checked ? .brandGreen : Color.gray.opacity(0.45)))
             }
             .buttonStyle(.plain)
 
@@ -181,6 +216,11 @@ struct PeopleView: View {
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+        .onTapGesture {
+            if selectionMode {
+                if isSelected { selectedIDs.remove(p.id) } else { selectedIDs.insert(p.id) }
+            }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button {
                 confirm.request(person: p)
