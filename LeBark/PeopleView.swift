@@ -5,7 +5,6 @@ struct PeopleView: View {
     @State private var search = ""
     @State private var filter: Filter = .unchecked
     @State private var toast: String?
-    @State private var showCheckedInList = true
     @State private var dateFilter: DateFilter = .all
 
     enum Filter: String, CaseIterable { case unchecked = "未结账", checked = "已结账", all = "全部" }
@@ -29,10 +28,13 @@ struct PeopleView: View {
         case .checked: arr = arr.filter { $0.checked }
         case .all: break
         }
+        // 时间倒序：日期从新到旧；同日内按位置、毫秒从大到小
         return arr.sorted { a, b in
             if a.dateKey != b.dateKey { return a.dateKey > b.dateKey }
-            if a.server != b.server { return a.server < b.server }
-            return a.position.compare(b.position, options: .numeric) == .orderedAscending
+            if a.server != b.server { return a.server.compare(b.server, options: .numeric) == .orderedDescending }
+            if a.position != b.position { return a.position.compare(b.position, options: .numeric) == .orderedDescending }
+            if a.timeCode != b.timeCode { return a.timeCode.compare(b.timeCode, options: .numeric) == .orderedDescending }
+            return a.name < b.name
         }
     }
 
@@ -76,7 +78,10 @@ struct PeopleView: View {
                             }
                         }
                     }
+                    // 切换筛选/日期时重建列表，避免切换「已结账」后内容向下偏移的布局异常
+                    .id("\(filter.rawValue)-\(dateFilter.rawValue)-\(search)")
                     .listStyle(.insetGrouped)
+                    .animation(nil, value: filter)
                 }
             }
             .background(Color(hex: "F5F7FC").ignoresSafeArea())

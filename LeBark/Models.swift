@@ -43,6 +43,8 @@ struct ServerSummary: Identifiable, Codable, Equatable {
     var coinsTotal: Int
     var accountsOK: Int
     var accountsTotal: Int
+    var parsedPersons: Int = 0     // 实际从明细解析出的人数
+    var mismatch: Bool = false     // 解析人数与推送声明的成功账号数不一致
     var receivedAt: Date = Date()
 
     var dedupeKey: String { "S|\(server)|\(dateKey)" }
@@ -55,6 +57,9 @@ struct IngestResult {
     var summaryUpdated: Bool = false
     var parsedServer: String = ""
     var dateKey: String = ""
+    var expectedAccounts: Int = 0   // 推送声明的抢到人数（账号成功数）
+    var parsedPersons: Int = 0      // 实际解析出的人数
+    var hasMismatch: Bool = false   // 两者不一致，可能解析遗漏
 
     var isEmpty: Bool {
         personsAdded == 0 && personsUpdated == 0 && abnormalsAdded == 0 && !summaryUpdated
@@ -270,11 +275,10 @@ final class LedgerStore: ObservableObject {
     @Published var abnormals: [AbnormalRecord] = [] { didSet { persist() } }
     @Published var summaries: [ServerSummary] = [] { didSet { persist() } }
     @Published var servers: [String] = ["710", "2673", "201", "202", "203", "204", "205"] { didSet { persist() } }
-    @Published var serverPort: UInt16 = 8765 { didSet { UserDefaults.standard.set(Int(serverPort), forKey: Self.kPort) } }
-    @Published var autoStartServer: Bool = true { didSet { UserDefaults.standard.set(autoStartServer, forKey: Self.kAutoStart) } }
-    @Published var notifyOnPush: Bool = false { didSet { UserDefaults.standard.set(notifyOnPush, forKey: Self.kNotify) } }
-    @Published var barkGroup: String = "乐币" { didSet { UserDefaults.standard.set(barkGroup, forKey: Self.kBarkGroup) } }
+    @Published var barkGroup: String = "乐币" { didSet { persist() } }
     @Published var lastEvent: String = ""
+    @Published var lastSyncAt: Date? = nil
+    @Published var lastSyncDetail: String = ""
 
     private var loaded = false
 
@@ -317,11 +321,18 @@ final class LedgerStore: ObservableObject {
             result.abnormalsAdded += 1
         }
 
-        if let s = parsed.summary {
+        // 数据校验：推送声明的「账号成功数」应等于解析出的名单人数
+        if var s = parsed.summary {
+            let parsedCount = parsed.persons.count
+            s.parsedPersons = parsedCount
+            s.mismatch = s.accountsOK > 0 && s.accountsOK != parsedCount
+            result.expectedAccounts = s.accountsOK
+            result.parsedPersons = parsedCount
+            result.hasMismatch = s.mismatch
             if let idx = summaries.firstIndex(where: { $0.dedupeKey == s.dedupeKey }) {
                 if summaries[idx] != s {
-                    var updated = s; updated.id = summaries[idx].id
-                    summaries[idx] = updated
+                    s.id = summaries[idx].id
+                    summaries[idx] = s
                     result.summaryUpdated = true
                 }
             } else {
@@ -332,7 +343,8 @@ final class LedgerStore: ObservableObject {
 
         result.parsedServer = parsed.persons.first?.server ?? parsed.summary?.server ?? ""
         result.dateKey = parsed.summary?.dateKey ?? (dateKey ?? PushParser.todayKey())
-        lastEvent = "收到 \(result.parsedServer) 汇总：+\(result.personsAdded) 人，异常 +\(result.abnormalsAdded)"
+        let warn = result.hasMismatch ? " ⚠️解析\(result.parsedPersons)/声明\(result.expectedAccounts)人" : ""
+        lastEvent = "收到 \(result.parsedServer) 汇总：+\(result.personsAdded) 人，异常 +\(result.abnormalsAdded)\(warn)"
         return result
     }
 
@@ -409,25 +421,57 @@ final class LedgerStore: ObservableObject {
 
     // MARK: 持久化
 
-    private static let kPort = "lebark.port"
-    private static let kAutoStart = "lebark.autostart"
-    private static let kNotify = "lebark.notify"
     private static let kPersons = "lebark.persons"
     private static let kAbnormals = "lebark.abnormals"
     private static let kSummaries = "lebark.summaries"
     private static let kServers = "lebark.servers"
     private static let kBarkGroup = "lebark.barkgroup"
 
+    /// 数据文件放在 App 的 Documents 目录：TrollStore 覆盖安装（更新 App）时 bundle id 不变，
+    /// 容器不会删除，文件与 UserDefaults 都会保留；这里额外落一份 JSON，方便备份/迁移。
+    private static var dataFileURL: URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("lebark_data.json")
+    }
+
+    private struct Snapshot: Codable {
+        var persons: [CheckoutPerson]
+        var abnormals: [AbnormalRecord]
+        var summaries: [ServerSummary]
+        var servers: [String]
+        var barkGroup: String
+    }
+
     private func persist() {
         guard loaded else { return }
+        let snap = Snapshot(persons: persons, abnormals: abnormals,
+                            summaries: summaries, servers: servers, barkGroup: barkGroup)
+        // 主：Documents 目录下的 JSON（原子写入，防中断损坏）
+        if let data = try? JSONEncoder().encode(snap), let url = Self.dataFileURL {
+            try? data.write(to: url, options: .atomic)
+        }
+        // 镜像：UserDefaults（兼容旧逻辑，作为兜底）
         let d = UserDefaults.standard
         if let data = try? JSONEncoder().encode(persons) { d.set(data, forKey: Self.kPersons) }
         if let data = try? JSONEncoder().encode(abnormals) { d.set(data, forKey: Self.kAbnormals) }
         if let data = try? JSONEncoder().encode(summaries) { d.set(data, forKey: Self.kSummaries) }
         d.set(servers, forKey: Self.kServers)
+        d.set(barkGroup, forKey: Self.kBarkGroup)
     }
 
     private func load() {
+        // 优先读 Documents JSON
+        if let url = Self.dataFileURL,
+           let data = try? Data(contentsOf: url),
+           let snap = try? JSONDecoder().decode(Snapshot.self, from: data) {
+            persons = snap.persons
+            abnormals = snap.abnormals
+            summaries = snap.summaries
+            servers = snap.servers
+            barkGroup = snap.barkGroup
+            return
+        }
+        // 兜底：读旧版 UserDefaults
         let d = UserDefaults.standard
         if let data = d.data(forKey: Self.kPersons),
            let arr = try? JSONDecoder().decode([CheckoutPerson].self, from: data) { persons = arr }
@@ -436,12 +480,11 @@ final class LedgerStore: ObservableObject {
         if let data = d.data(forKey: Self.kSummaries),
            let arr = try? JSONDecoder().decode([ServerSummary].self, from: data) { summaries = arr }
         if let arr = d.stringArray(forKey: Self.kServers), !arr.isEmpty { servers = arr }
-        let p = d.integer(forKey: Self.kPort)
-        if p > 0 { serverPort = UInt16(p) }
-        autoStartServer = d.object(forKey: Self.kAutoStart) as? Bool ?? true
-        notifyOnPush = d.object(forKey: Self.kNotify) as? Bool ?? false
         barkGroup = d.string(forKey: Self.kBarkGroup) ?? "乐币"
     }
+
+    /// 数据文件所在目录（供设置页展示）
+    static var dataFilePath: String { dataFileURL?.path ?? "（不可访问）" }
 
     private func firstMatch(_ pattern: String, _ text: String) -> [String]? {
         guard let re = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }

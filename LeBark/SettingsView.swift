@@ -2,117 +2,56 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var store: LedgerStore
-    @EnvironmentObject private var server: PushHTTPServer
+    @EnvironmentObject private var sync: SyncManager
     @State private var showImport = false
     @State private var showClearConfirm = false
     @State private var newServer = ""
     @State private var toast: String?
-    @State private var editingPort: String = ""
-
-    private var pushURL: String { NetworkInfo.pushURL(port: store.serverPort) }
 
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 18) {
 
-                    // 服务器状态
+                    // 自动同步
                     VStack(alignment: .leading, spacing: 12) {
-                        Label("数据接收服务（局域网直连，可选）", systemImage: "antenna.radiowaves.left.and.right")
+                        Label("BARK 自动同步", systemImage: "arrow.triangle.2.circlepath.circle.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-
-                        Text("通知继续用你现有的 BARK，这里只负责收数据做统计。若 7 台机器和手机同内网，可让它们直接 POST 到下方地址；否则用「粘贴导入」即可。")
+                        Text("进入 App 自动拉取一次，之后每 60 秒拉取一次。数据存进本 App，不受 BARK 快照 100 条截断限制，也不再需要局域网监听。")
                             .font(.system(size: 11)).foregroundColor(.subtle)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        HStack {
-                            HStack(spacing: 6) {
-                                Circle().fill(server.running ? Color.brandGreen : Color.gray.opacity(0.5))
-                                    .frame(width: 9, height: 9)
-                                Text(server.running ? "运行中" : "已停止")
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundColor(server.running ? .brandGreen : .subtle)
-                            }
-                            Spacer()
-                            Button(server.running ? "停止" : "启动") {
-                                if server.running { server.stop() }
-                                else { server.start(port: store.serverPort) }
-                            }
-                            .font(.system(size: 13, weight: .semibold)).foregroundColor(.brandIndigo)
-                        }
-
-                        Toggle("打开 App 自动启动", isOn: $store.autoStartServer)
-                            .font(.system(size: 13.5)).tint(.brandIndigo)
-
-                        Toggle("收数据时也弹本地通知（默认关，避免和 BARK 重复）", isOn: $store.notifyOnPush)
-                            .font(.system(size: 13.5)).tint(.brandIndigo)
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("局域网数据接收地址（发给各服务器，可选）")
-                                .font(.system(size: 11.5)).foregroundColor(.subtle)
-                            HStack {
-                                Text(pushURL)
-                                    .font(.system(size: 13, design: .monospaced))
-                                    .foregroundColor(.brandIndigo)
-                                    .textSelection(.enabled)
-                                    .lineLimit(1)
-                                Spacer()
-                                Button {
-                                    UIPasteboard.general.string = pushURL
-                                    toast = "推送地址已复制"
-                                } label: {
-                                    Image(systemName: "doc.on.doc").foregroundColor(.brandIndigo)
-                                }
-                            }
-                            Text("各服务器把汇总 POST 到这个地址即可，格式见下方说明。手机需与服务器同局域网。")
-                                .font(.system(size: 11)).foregroundColor(.subtle)
-                        }
-                        .padding(12)
-                        .background(Color(hex: "F7F8FC"))
-                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    }
-                    .cardStyle()
-
-                    // 端口
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("监听端口", systemImage: "number")
-                            .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-                        HStack(spacing: 10) {
-                            TextField("8765", text: $editingPort)
-                                .keyboardType(.numberPad)
+                        HStack(spacing: 8) {
+                            Text("分组名").font(.system(size: 12.5)).foregroundColor(.subtle)
+                            TextField("乐币", text: $store.barkGroup)
                                 .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 16)).monospacedDigit()
-                            Button("应用") {
-                                if let p = UInt16(editingPort), p > 1024 {
-                                    store.serverPort = p
-                                    if store.autoStartServer { server.start(port: p) }
-                                    toast = "端口已改为 \(p)"
-                                } else {
-                                    toast = "端口需为 1025~65535"
-                                }
-                            }
-                            .font(.system(size: 13, weight: .semibold)).foregroundColor(.brandIndigo)
+                                .font(.system(size: 14))
                         }
-                        Text("改端口后需重启服务；默认 8765。若提示端口占用，换个数字即可。")
-                            .font(.system(size: 11)).foregroundColor(.subtle)
+                        HStack {
+                            Image(systemName: sync.syncing ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill")
+                                .foregroundColor(sync.syncing ? .brandOrange : .brandGreen)
+                            Text(sync.syncing ? "正在拉取…" : (sync.lastDetail.isEmpty ? "等待首次同步" : sync.lastDetail))
+                                .font(.system(size: 11.5)).foregroundColor(.subtle)
+                                .lineLimit(2)
+                            Spacer()
+                            Button("立即刷新") { sync.syncNow(); toast = "正在刷新…" }
+                                .font(.system(size: 12.5, weight: .semibold)).foregroundColor(.brandIndigo)
+                        }
                     }
                     .cardStyle()
-                    .onAppear { editingPort = String(store.serverPort) }
 
-                    // 服务器名单
+                    // 服务器名单（顺序即今日汇总的展示顺序）
                     VStack(alignment: .leading, spacing: 10) {
-                        Label("服务器编号（用于统计展示）", systemImage: "server.rack")
+                        Label("服务器编号（按此顺序展示）", systemImage: "server.rack")
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-                        Text("推送里没带编号时，可在这里维护一份，方便看哪台没推。")
+                        Text("今日汇总按下面的顺序从上到下排列。可点 × 删除、拖动下方顺序调整需重建，当前按添加顺序。")
                             .font(.system(size: 11)).foregroundColor(.subtle)
 
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
-                            ForEach(store.servers, id: \.self) { s in
+                            ForEach(Array(store.servers.enumerated()), id: \.offset) { idx, s in
                                 HStack(spacing: 5) {
-                                    Text(s).font(.system(size: 12.5, weight: .medium)).foregroundColor(.brandIndigo)
-                                    Button {
-                                        store.removeServer(s)
-                                    } label: {
+                                    Text("\(idx + 1). \(s)").font(.system(size: 12, weight: .medium)).foregroundColor(.brandIndigo)
+                                    Button { store.removeServer(s) } label: {
                                         Image(systemName: "xmark.circle.fill").font(.system(size: 12)).foregroundColor(.subtle)
                                     }
                                 }
@@ -125,28 +64,23 @@ struct SettingsView: View {
                             TextField("新编号，如 206", text: $newServer)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 14))
-                            Button {
-                                store.addServer(newServer)
-                                newServer = ""
-                            } label: {
+                            Button { store.addServer(newServer); newServer = "" } label: {
                                 Image(systemName: "plus.circle.fill").font(.title2).foregroundColor(.brandIndigo)
                             }
                         }
                     }
                     .cardStyle()
 
-                    // 粘贴导入
-                    Button {
-                        showImport = true
-                    } label: {
+                    // 粘贴导入（兜底）
+                    Button { showImport = true } label: {
                         HStack(spacing: 12) {
                             ZStack {
                                 Circle().fill(Color.brandIndigo.opacity(0.12)).frame(width: 40, height: 40)
                                 Image(systemName: "doc.on.clipboard.fill").foregroundColor(.brandIndigo)
                             }
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("粘贴导入").font(.system(size: 15, weight: .semibold)).foregroundColor(.ink)
-                                Text("从 BARK 复制历史消息，或手动粘贴汇总文本")
+                                Text("粘贴导入 / 手动拉取").font(.system(size: 15, weight: .semibold)).foregroundColor(.ink)
+                                Text("自动同步失败时的兜底：手动拉取 BARK 或粘贴汇总文本")
                                     .font(.system(size: 11.5)).foregroundColor(.subtle)
                             }
                             Spacer()
@@ -156,31 +90,19 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .cardStyle()
 
-                    // 接口格式说明
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("推送接口格式", systemImage: "questionmark.circle.fill")
-                            .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-                        Text("POST JSON：")
-                            .font(.system(size: 11.5, weight: .medium)).foregroundColor(.ink)
-                        Text("{\"title\":\"[202]今日汇总\",\"body\":\"金币:203/12684,账号:2/44\\n[21][929]:82unicorn:金 90,[22.5]\\n异常信息:\"}")
-                            .font(.system(size: 10.5, design: .monospaced)).foregroundColor(.subtle)
-                            .textSelection(.enabled)
-                        Text("也可 GET：\(pushURL)/[202]今日汇总/正文   或   ?title=..&body=..")
-                            .font(.system(size: 10.5, design: .monospaced)).foregroundColor(.subtle)
-                            .textSelection(.enabled)
-                        Text("最近接收：\(server.lastRawRequest.isEmpty ? "—" : server.lastRawRequest)")
-                            .font(.system(size: 10.5)).foregroundColor(.subtle)
-                            .lineLimit(2)
-                    }
-                    .cardStyle()
-
                     // 数据管理
                     VStack(alignment: .leading, spacing: 10) {
                         Label("数据管理", systemImage: "externaldrive.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
+                        Text("名单 \(store.persons.count) 条 · 异常 \(store.abnormals.count) 条 · 汇总 \(store.summaries.count) 条")
+                            .font(.system(size: 11.5)).foregroundColor(.subtle)
+                        Text("数据文件：\(LedgerStore.dataFilePath)")
+                            .font(.system(size: 10, design: .monospaced)).foregroundColor(.subtle)
+                            .textSelection(.enabled)
+                        Text("数据存在手机本机 Documents 目录，覆盖安装更新 App 不会删除。若卸载 App 会一并删除，重要数据请先复制上述路径文件备份。")
+                            .font(.system(size: 11)).foregroundColor(.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
                         HStack {
-                            Text("名单 \(store.persons.count) 条 · 异常 \(store.abnormals.count) 条 · 汇总 \(store.summaries.count) 条")
-                                .font(.system(size: 11.5)).foregroundColor(.subtle)
                             Spacer()
                             Button("清空全部") { showClearConfirm = true }
                                 .font(.system(size: 12.5, weight: .medium)).foregroundColor(.red)
@@ -201,10 +123,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showImport) { ImportView().environmentObject(store) }
             .alert("确认清空", isPresented: $showClearConfirm) {
                 Button("取消", role: .cancel) {}
-                Button("清空", role: .destructive) {
-                    store.clearAll()
-                    toast = "数据已清空"
-                }
+                Button("清空", role: .destructive) { store.clearAll(); toast = "数据已清空" }
             } message: {
                 Text("将删除本机所有名单、异常与汇总记录，不可恢复。")
             }
@@ -213,7 +132,7 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - 粘贴导入
+// MARK: - 粘贴导入 / 手动拉取
 
 struct ImportView: View {
     @EnvironmentObject private var store: LedgerStore
@@ -227,21 +146,12 @@ struct ImportView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 16) {
-                    // 从 BARK 一键读取（只拉指定分组）
                     VStack(alignment: .leading, spacing: 10) {
-                        Label("从 BARK 拉取「\(store.barkGroup)」分组", systemImage: "arrow.down.doc.fill")
+                        Label("手动从 BARK 拉取「\(store.barkGroup)」分组", systemImage: "arrow.down.doc.fill")
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
-                        Text("用巨魔权限读取本机 BARK 历史，只取下面这个分组的消息，自动解析成结账名单存进本 App。本 App 的数据会一直累积，不受 BARK 快照条数限制。")
+                        Text("优先读 BARK 完整历史数据库（全量、不截断），失败时回退小组件快照。只取这个分组的汇总消息。")
                             .font(.system(size: 11)).foregroundColor(.subtle)
                             .fixedSize(horizontal: false, vertical: true)
-
-                        HStack(spacing: 8) {
-                            Text("分组名").font(.system(size: 12.5)).foregroundColor(.subtle)
-                            TextField("乐币", text: $store.barkGroup)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 14))
-                        }
-
                         Button {
                             barkReading = true
                             let group = store.barkGroup
@@ -253,26 +163,22 @@ struct ImportView: View {
                                         resultText = "读取失败：\(err)"
                                     } else {
                                         let imported = store.importBarkMessages(r.messages)
-                                        resultText = "从 \(r.source) 拉取 \(r.messages.count) 条 → 名单 +\(imported.personsAdded)，更新 \(imported.personsUpdated)，异常 +\(imported.abnormalsAdded)"
+                                        let warn = imported.hasMismatch ? " ⚠️解析\(imported.parsedPersons)/声明\(imported.expectedAccounts)人" : ""
+                                        resultText = "从 \(r.source) 拉取 \(r.messages.count) 条 → 名单 +\(imported.personsAdded)，更新 \(imported.personsUpdated)，异常 +\(imported.abnormalsAdded)\(warn)"
                                     }
                                 }
                             }
                         } label: {
                             HStack {
-                                if barkReading {
-                                    ProgressView().progressViewStyle(.circular)
-                                }
+                                if barkReading { ProgressView().progressViewStyle(.circular) }
                                 Text(barkReading ? "正在拉取…" : "拉取并导入")
                                     .font(.system(size: 14.5, weight: .semibold))
                             }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
+                            .foregroundColor(.white).frame(maxWidth: .infinity).padding(.vertical, 13)
                             .background(LinearGradient(colors: [.brandGreen, Color(hex: "0EA5A0")], startPoint: .leading, endPoint: .trailing))
                             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                         }
-                        .buttonStyle(.plain)
-                        .disabled(barkReading)
+                        .buttonStyle(.plain).disabled(barkReading)
                     }
                     .cardStyle()
 
@@ -281,15 +187,10 @@ struct ImportView: View {
                             .font(.system(size: 13, weight: .semibold)).foregroundColor(.subtle)
                         TextEditor(text: $text)
                             .font(.system(size: 13, design: .monospaced))
-                            .frame(minHeight: 180)
-                            .padding(8)
+                            .frame(minHeight: 160).padding(8)
                             .background(Color(hex: "F7F8FC"))
                             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .stroke(Color(hex: "E3E8F3"), lineWidth: 1))
-                        Button {
-                            if let s = UIPasteboard.general.string { text = s }
-                        } label: {
+                        Button { if let s = UIPasteboard.general.string { text = s } } label: {
                             Label("从剪贴板粘贴", systemImage: "clipboard")
                                 .font(.system(size: 12.5, weight: .medium)).foregroundColor(.brandIndigo)
                         }
@@ -303,10 +204,7 @@ struct ImportView: View {
                             get: { datePickerDate(from: dateKey) },
                             set: { dateKey = key(from: $0) }
                         ), displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
-                        Text("从 BARK 复制历史消息时，选对应日期，名单会归到那一天。")
-                            .font(.system(size: 11)).foregroundColor(.subtle)
+                        .datePickerStyle(.compact).labelsHidden()
                     }
                     .cardStyle()
 
@@ -336,13 +234,9 @@ struct ImportView: View {
                 .padding(16)
             }
             .background(Color(hex: "F5F7FC").ignoresSafeArea())
-            .navigationTitle("粘贴导入")
+            .navigationTitle("导入")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") { dismiss() }.foregroundColor(.brandIndigo)
-                }
-            }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("完成") { dismiss() } } }
         }
     }
 

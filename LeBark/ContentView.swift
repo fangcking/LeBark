@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: LedgerStore
-    @EnvironmentObject private var server: PushHTTPServer
+    @EnvironmentObject private var sync: SyncManager
 
     var body: some View {
         TabView {

@@ -20,8 +20,15 @@ struct WeekView: View {
         }
     }
     private var grouped: [(key: String, items: [CheckoutPerson])] {
-        let keys = Array(Set(shown.map { $0.dateKey })).sorted()
-        return keys.map { k in (k, shown.filter { $0.dateKey == k }) }
+        // 时间倒序：日期从新到旧
+        let keys = Array(Set(shown.map { $0.dateKey })).sorted(by: >)
+        return keys.map { k in
+            (k, shown.filter { $0.dateKey == k }.sorted { a, b in
+                if a.position != b.position { return a.position.compare(b.position, options: .numeric) == .orderedDescending }
+                if a.timeCode != b.timeCode { return a.timeCode.compare(b.timeCode, options: .numeric) == .orderedDescending }
+                return a.name < b.name
+            })
+        }
     }
     private var totalAmount: Double { shown.reduce(0) { $0 + $1.amount } }
     private var serverKeys: [String] { Array(Set(weekPersons.map { $0.server })).sorted() }
@@ -193,8 +200,15 @@ struct WeekScreenshotView: View {
     let mode: String
 
     private var grouped: [(key: String, items: [CheckoutPerson])] {
-        let keys = Array(Set(persons.map { $0.dateKey })).sorted()
-        return keys.map { k in (k, persons.filter { $0.dateKey == k }) }
+        // 时间倒序：日期从新到旧，明细按位置/毫秒从大到小
+        let keys = Array(Set(persons.map { $0.dateKey })).sorted(by: >)
+        return keys.map { k in
+            (k, persons.filter { $0.dateKey == k }.sorted { a, b in
+                if a.position != b.position { return a.position.compare(b.position, options: .numeric) == .orderedDescending }
+                if a.timeCode != b.timeCode { return a.timeCode.compare(b.timeCode, options: .numeric) == .orderedDescending }
+                return a.name < b.name
+            })
+        }
     }
 
     var body: some View {
