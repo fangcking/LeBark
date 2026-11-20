@@ -1,0 +1,8 @@
+Package: com.trollautoclicker.tweak
+Name: TrollAutoClicker
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Maintainer: TrollAutoClicker
+Author: TrollAutoClicker
+Section: Tweaks
+Description: 巨魔环境悬浮连点器：屏幕选点、毫秒级点击间隔、可拖动置顶悬浮面板。通过 TrollFools 注入目标 App 使用。

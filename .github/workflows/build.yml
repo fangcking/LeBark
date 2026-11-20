@@ -1,0 +1,83 @@
+name: Build TrollAutoClicker DEB
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ autoclicker-build ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: autoclicker-build
+
+      - name: Install Theos and iOS SDK
+        uses: waruhachi/theos-action@v2.6.5
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+          libgcuniversal: 'false'
+          altlist: 'false'
+          remotelog: 'false'
+          comet: 'false'
+          orion: 'false'
+          shook: 'false'
+
+      - name: Brew GNU make
+        run: brew install make
+
+      - name: Build rootless deb
+        run: |
+          export PATH="/opt/homebrew/opt/make/libexec/gnubin:/usr/local/opt/make/libexec/gnubin:$PATH"
+          set +e
+          make clean
+          make package FINALPACKAGE=1 2>&1 | tee build.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== 编译错误标注 ====="
+            grep -iE "error:|fatal error|undefined symbols|ld: error" build.log | sed 's/^/::error title=编译错误::/' || true
+            echo "===== 日志末尾 100 行 ====="
+            tail -n 100 build.log
+            exit "$STATUS"
+          fi
+          echo "===== 产物 ====="
+          ls -lh packages/*.deb
+
+      - name: Collect deb
+        id: deb
+        run: |
+          set -e
+          DEB=$(find packages -name '*.deb' | head -n 1)
+          test -n "$DEB"
+          cp "$DEB" TrollAutoClicker.deb
+          ls -lh TrollAutoClicker.deb
+          file TrollAutoClicker.deb
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrollAutoClicker-DEB
+          path: TrollAutoClicker.deb
+          if-no-files-found: error
+
+      - name: Publish deb to GitHub Release (公开直链下载)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="autoclicker-latest"
+          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
+          git tag -f "$TAG" >/dev/null 2>&1 || true
+          git push -f origin "$TAG" >/dev/null 2>&1 || true
+          gh release create "$TAG" TrollAutoClicker.deb \
+            --title "TrollAutoClicker 连点器（巨魔 deb）" \
+            --notes "Theos 云编译 rootless deb，内含 TrollAutoClicker.dylib。用 TrollFools 注入目标 App。" \
+            --target "$GITHUB_SHA"
+          echo "DEB 直链： https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/TrollAutoClicker.deb"
