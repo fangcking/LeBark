@@ -284,11 +284,11 @@ struct ServerDetailView: View {
     let persons: [CheckoutPerson]
     let summary: ServerSummary?
 
-    /// 时间倒序：日期 → 位置 → 毫秒，均大到小
+    /// 按位置正序：位置 → 毫秒，均小到大（纯数字按数值比较，避免 10 排在 2 前）
     private var sorted: [CheckoutPerson] {
         persons.sorted { a, b in
-            if a.position != b.position { return a.position.compare(b.position, options: .numeric) == .orderedDescending }
-            if a.timeCode != b.timeCode { return a.timeCode.compare(b.timeCode, options: .numeric) == .orderedDescending }
+            if a.position != b.position { return a.position.compare(b.position, options: .numeric) == .orderedAscending }
+            if a.timeCode != b.timeCode { return a.timeCode.compare(b.timeCode, options: .numeric) == .orderedAscending }
             return a.name < b.name
         }
     }
