@@ -14,8 +14,6 @@ static const CGFloat kVisibleStepRows = 3.5;
 static const NSTimeInterval kMinDelay = 0.05, kMaxDelay = 10;
 static const NSTimeInterval kMinSwipeTime = 0.05, kMaxSwipeTime = 3;
 
-static NSInteger const kLoopValues[] = {0, 1, 2, 3, 5, 10, 25, 50, 100, 250, 500, 1000};
-
 UIColor *ATTapColor(void) { return [UIColor colorWithRed:0.30 green:0.58 blue:1.00 alpha:1]; }
 UIColor *ATSwipeColor(void) { return [UIColor colorWithRed:1.00 green:0.62 blue:0.22 alpha:1]; }
 UIColor *ATGoColor(void) { return [UIColor colorWithRed:0.20 green:0.80 blue:0.45 alpha:1]; }
@@ -46,10 +44,6 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         return [NSString stringWithFormat:@"%.0f ms", seconds * 1000];
     }
     return [NSString stringWithFormat:@"%.1f s", seconds];
-}
-
-static NSString *ATFormatLoops(NSInteger loops) {
-    return loops == 0 ? @"∞" : [NSString stringWithFormat:@"%ld×", (long)loops];
 }
 
 #pragma mark - Passthrough
@@ -276,9 +270,9 @@ static NSString *ATFormatLoops(NSInteger loops) {
     NSMutableArray<UIView *> *_rows;
     NSInteger _highlighted;
     UITextField *_tapIntervalField;          // 点击间隔输入框，单位毫秒
+    UITextField *_loopCountField;            // 循环次数输入框，0/留空 = 无限循环
     UISlider *_swipeDelaySlider, *_swipeTimeSlider;
-    UILabel *_swipeDelayValue, *_swipeTimeValue, *_loopValue;
-    UIStepper *_loopStepper;
+    UILabel *_swipeDelayValue, *_swipeTimeValue;
     UISwitch *_touchesSwitch;
     ATGradientButton *_runButton;
     UILabel *_statusLabel;
@@ -562,17 +556,68 @@ static NSString *ATFormatLoops(NSInteger loops) {
     return row;
 }
 
-// The default stepper is drawn for a light background; give it opaque parts.
-- (void)styleStepper:(UIStepper *)stepper {
-    UIImage *(^white)(NSString *) = ^UIImage *(NSString *name) {
-        return [ATSymbol(name, 14, UIFontWeightBold) imageWithTintColor:[UIColor whiteColor]
-                                                         renderingMode:UIImageRenderingModeAlwaysOriginal];
-    };
-    [stepper setIncrementImage:white(@"plus") forState:UIControlStateNormal];
-    [stepper setDecrementImage:white(@"minus") forState:UIControlStateNormal];
-    stepper.backgroundColor = ATCardColor();
-    stepper.layer.cornerRadius = 9;
-    stepper.clipsToBounds = YES;
+// 循环次数输入框：直接输入数字，0 或留空表示无限循环。
+- (UIView *)loopRow {
+    UILabel *label = [[UILabel alloc] init];
+    label.text = @"循环次数";
+    label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    label.textColor = ATTextColor();
+
+    UIView *box = [[UIView alloc] init];
+    box.backgroundColor = ATCardColor();
+    box.layer.cornerRadius = 10;
+    box.layer.cornerCurve = kCACornerCurveContinuous;
+    box.clipsToBounds = YES;
+
+    UITextField *field = [[UITextField alloc] init];
+    field.keyboardType = UIKeyboardTypeNumberPad;
+    field.returnKeyType = UIReturnKeyDone;
+    field.textAlignment = NSTextAlignmentRight;
+    field.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightSemibold];
+    field.textColor = ATGoColor();
+    field.borderStyle = UITextBorderStyleNone;
+    field.placeholder = @"∞";
+    field.delegate = self;
+    field.text = _session.loopCount ? [NSString stringWithFormat:@"%ld", (long)_session.loopCount] : @"";
+    [field addTarget:self action:@selector(loopChanged:) forControlEvents:UIControlEventEditingChanged];
+    [field addTarget:self action:@selector(loopDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
+    [field addTarget:self action:@selector(loopDone:) forControlEvents:UIControlEventEditingDidEnd];
+    [field.widthAnchor constraintEqualToConstant:56].active = YES;
+
+    UILabel *unit = [[UILabel alloc] init];
+    unit.text = @"次";
+    unit.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    unit.textColor = ATSecondaryTextColor();
+
+    UIStackView *input = [[UIStackView alloc] initWithArrangedSubviews:@[field, unit]];
+    input.axis = UILayoutConstraintAxisHorizontal;
+    input.alignment = UIStackViewAlignmentCenter;
+    input.spacing = 4;
+    input.layoutMargins = UIEdgeInsetsMake(0, 10, 0, 10);
+    input.layoutMarginsRelativeArrangement = YES;
+    input.translatesAutoresizingMaskIntoConstraints = NO;
+    [box addSubview:input];
+    [NSLayoutConstraint activateConstraints:@[
+        [input.topAnchor constraintEqualToAnchor:box.topAnchor constant:6],
+        [input.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-6],
+        [input.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+        [input.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
+    ]];
+    _loopCountField = field;
+
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[label, [UIView new], box]];
+    row.alignment = UIStackViewAlignmentCenter;
+
+    UILabel *hint = [[UILabel alloc] init];
+    hint.text = @"留空或 0 = 无限循环";
+    hint.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
+    hint.textColor = ATMutedTextColor();
+    hint.textAlignment = NSTextAlignmentRight;
+
+    UIStackView *wrap = [[UIStackView alloc] initWithArrangedSubviews:@[row, hint]];
+    wrap.axis = UILayoutConstraintAxisVertical;
+    wrap.spacing = 2;
+    return wrap;
 }
 
 - (UIView *)timingSection {
@@ -582,26 +627,7 @@ static NSString *ATFormatLoops(NSInteger loops) {
     _swipeDelaySlider.value = ATSliderValue(_session.swipeDelay, kMinDelay, kMaxDelay);
     _swipeTimeSlider.value = ATSliderValue(_session.swipeDuration, kMinSwipeTime, kMaxSwipeTime);
 
-    UILabel *loopLabel = [[UILabel alloc] init];
-    loopLabel.text = @"循环次数";
-    loopLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-    loopLabel.textColor = ATTextColor();
-    _loopValue = [[UILabel alloc] init];
-    _loopValue.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold];
-    _loopValue.textColor = ATGoColor();
-    _loopStepper = [[UIStepper alloc] init];
-    _loopStepper.minimumValue = 0;
-    _loopStepper.maximumValue = sizeof(kLoopValues) / sizeof(kLoopValues[0]) - 1;
-    for (NSUInteger i = 0; i < sizeof(kLoopValues) / sizeof(kLoopValues[0]); i++) {
-        if (kLoopValues[i] == _session.loopCount) {
-            _loopStepper.value = i;
-        }
-    }
-    [_loopStepper addTarget:self action:@selector(loopChanged) forControlEvents:UIControlEventValueChanged];
-    [self styleStepper:_loopStepper];
-    UIStackView *loopRow = [[UIStackView alloc] initWithArrangedSubviews:@[loopLabel, [UIView new], _loopValue, _loopStepper]];
-    loopRow.alignment = UIStackViewAlignmentCenter;
-    loopRow.spacing = 12;
+    UIView *loopRow = [self loopRow];
 
     UILabel *touchesLabel = [[UILabel alloc] init];
     touchesLabel.text = @"显示触摸";
@@ -769,7 +795,9 @@ static NSString *ATFormatLoops(NSInteger loops) {
     }
     _swipeDelayValue.text = ATFormatSeconds(_session.swipeDelay);
     _swipeTimeValue.text = ATFormatSeconds(_session.swipeDuration);
-    _loopValue.text = ATFormatLoops(_session.loopCount);
+    if (!_loopCountField.isEditing) {
+        _loopCountField.text = _session.loopCount ? [NSString stringWithFormat:@"%ld", (long)_session.loopCount] : @"";
+    }
 }
 
 - (void)intervalChanged:(UITextField *)field {
@@ -804,10 +832,20 @@ static NSString *ATFormatLoops(NSInteger loops) {
     [self refreshTimingLabels];
 }
 
-- (void)loopChanged {
-    _session.loopCount = kLoopValues[(NSInteger)_loopStepper.value];
-    [self refreshTimingLabels];
+- (void)loopChanged:(UITextField *)field {
+    NSInteger value = [field.text integerValue]; // 空串 → 0 → 无限循环
+    if (value < 0) value = 0;
+    if (value > 99999) {
+        value = 99999;
+        field.text = @"99999";
+    }
+    _session.loopCount = value;
     [self updateStatus];
+}
+
+- (void)loopDone:(UITextField *)field {
+    [field resignFirstResponder];
+    [self refreshTimingLabels];
 }
 
 - (void)touchesChanged {
