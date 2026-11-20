@@ -5,6 +5,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// 悬浮窗输入框请求/归还 keyWindow：不这样做键盘不会弹出。
+extern NSString *const ATOverlayKeyboardWillShowNotification;
+extern NSString *const ATOverlayKeyboardDidHideNotification;
+
 UIColor *ATTapColor(void);
 UIColor *ATSwipeColor(void);
 UIColor *ATGoColor(void);
@@ -36,7 +40,7 @@ UIColor *ATCardColor(void);
 @property (nonatomic, getter=isActive) BOOL active;
 @end
 
-@interface ATPanelView : UIView
+@interface ATPanelView : UIView <UITextFieldDelegate>
 - (instancetype)initWithSession:(ATSession *)session;
 @property (nonatomic, copy, nullable) void (^onRecord)(void);
 @property (nonatomic, copy, nullable) void (^onClose)(void);

@@ -202,6 +202,9 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
 #pragma mark - Overlay
 
 @interface ATOverlayWindow : UIWindow
+//  Normally NO so taps fall through to the target app. While the panel's text
+//  field is editing we flip this and make the window key so the keyboard shows.
+@property (nonatomic) BOOL at_wantsKeyWindow;
 @end
 
 @implementation ATOverlayWindow
@@ -210,7 +213,7 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
     return hit == self ? nil : hit;
 }
 - (BOOL)canBecomeKeyWindow {
-    return NO;
+    return self.at_wantsKeyWindow;
 }
 @end
 
@@ -229,6 +232,7 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
     NSMutableArray<CAShapeLayer *> *_arrows;       // one per step, by index; hidden for taps
     BOOL _bubblePlaced;
     CGSize _lastSize;
+    UIWindow *_previousKeyWindow;                  // restored after the interval field edits
 }
 
 - (void)loadView {
@@ -307,6 +311,37 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
 
     [self wireCallbacks];
     [self rebuildMarkers];
+
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserver:self selector:@selector(keyboardWillShowForPanel:)
+               name:ATOverlayKeyboardWillShowNotification object:nil];
+    [nc addObserver:self selector:@selector(keyboardDidHideForPanel:)
+               name:ATOverlayKeyboardDidHideNotification object:nil];
+}
+
+// Let the interval text field pop the keyboard: temporarily make our overlay the
+// key window, then hand focus back to whichever window was key before.
+- (void)keyboardWillShowForPanel:(NSNotification *)note {
+    UIWindow *current = [UIApplication sharedApplication].keyWindow;
+    if (current != self.view.window) {
+        _previousKeyWindow = current;
+    }
+    ATOverlayWindow *overlay = (ATOverlayWindow *)self.view.window;
+    overlay.at_wantsKeyWindow = YES;
+    [overlay makeKeyWindow];
+}
+
+- (void)keyboardDidHideForPanel:(NSNotification *)note {
+    ATOverlayWindow *overlay = (ATOverlayWindow *)self.view.window;
+    overlay.at_wantsKeyWindow = NO;
+    if (_previousKeyWindow) {
+        [_previousKeyWindow makeKeyWindow];
+        _previousKeyWindow = nil;
+    }
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)wireCallbacks {

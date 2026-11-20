@@ -2,6 +2,9 @@
 
 #import <math.h>
 
+NSString *const ATOverlayKeyboardWillShowNotification = @"ATOverlayKeyboardWillShowNotification";
+NSString *const ATOverlayKeyboardDidHideNotification = @"ATOverlayKeyboardDidHideNotification";
+
 static const CGFloat kBubbleSize = 58;
 static const CGFloat kEdgeMargin = 10;
 static const CGFloat kStepRowHeight = 50;
@@ -526,6 +529,8 @@ static NSString *ATFormatLoops(NSInteger loops) {
     field.textColor = ATTapColor();
     field.borderStyle = UITextBorderStyleNone;
     field.text = [NSString stringWithFormat:@"%ld", (long)_session.tapIntervalMs];
+    field.delegate = self;
+    field.returnKeyType = UIReturnKeyDone;
     [field addTarget:self action:@selector(intervalChanged:) forControlEvents:UIControlEventEditingChanged];
     [field addTarget:self action:@selector(intervalDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
     [field addTarget:self action:@selector(intervalDone:) forControlEvents:UIControlEventEditingDidEnd];
@@ -772,6 +777,17 @@ static NSString *ATFormatLoops(NSInteger loops) {
     if (value < 10) value = 10;
     if (value > 60000) value = 60000;
     _session.tapIntervalMs = value;
+}
+
+// 悬浮窗默认不是 keyWindow，直接 becomeFirstResponder 键盘不会弹。
+// 在开始编辑前先通知外层把悬浮窗临时设为 keyWindow。
+- (BOOL)textFieldShouldBeginEditing:(UITextField *)textField {
+    [[NSNotificationCenter defaultCenter] postNotificationName:ATOverlayKeyboardWillShowNotification object:self];
+    return YES;
+}
+
+- (void)textFieldDidEndEditing:(UITextField *)textField {
+    [[NSNotificationCenter defaultCenter] postNotificationName:ATOverlayKeyboardDidHideNotification object:self];
 }
 
 - (void)intervalDone:(UITextField *)field {
