@@ -1,8 +1,13 @@
 # TrollAutoClicker（巨魔环境 iOS 悬浮连点器）
 
-一个可注入到目标 App 里的连点器动态库，编译后产出 **`.deb`**（内含 `.dylib`），适配 TrollStore + TrollFools 工作流。
+一个可注入到目标 App 里的连点器动态库，产出 **`.deb`**（内含 `.dylib`），适配 TrollStore + TrollFools 工作流。
 
-> **关于 `packages/` 里现成的 deb**：当前环境无法完成 iOS 交叉编译，因此这个 deb 内打包的是上游 AutoTap 官方 dylib（不是本仓库改造过的版本）。它已经支持屏幕选点、悬浮可拖动置顶、循环点击，点击间隔用滑杆设置且显示为毫秒（50 ms 起）；本仓库源码中的「毫秒输入框」版本需要在有 Theos 的 Mac 上按下方命令自行编译。
+> **关于 `packages/` 里现成的 deb**：这是本仓库源码经 GitHub Actions 云编译（Theos，rootless）产出的**正式版本**，带「点击间隔毫秒输入框」，不是上游占位包。可直接用于 TrollFools 注入。内部 dylib 为 arm64 + arm64e 双架构 Mach-O。
+>
+> - 现成 deb：`packages/com.trollautoclicker.tweak_1.0.0_iphoneos-arm64.deb`（67 KB）
+> - 现成 dylib：`packages/TrollAutoClicker.dylib`（387 KB，从上面的 deb 中提取）
+> - 云编译仓库分支：`https://github.com/fangcking/LeBark` 的 `autoclicker-build` 分支
+> - 公开下载直链：`https://github.com/fangcking/LeBark/releases/download/autoclicker-latest/TrollAutoClicker.deb`
 
 ## 已实现的功能
 
@@ -37,7 +42,9 @@ make package FINALPACKAGE=1
 make FINALPACKAGE=1
 ```
 
-> deb 包内的 dylib 路径为 `/usr/lib/TrollAutoClicker/TrollAutoClicker.dylib`。若你的 TrollFools 版本不支持直接注入 deb，可用解压工具打开 deb，取出该 dylib 再注入。
+> deb 包内的 dylib 路径为 `/var/jb/Library/MobileSubstrate/DynamicLibraries/TrollAutoClicker.dylib`（rootless 布局）。若你的 TrollFools 版本不支持直接注入 deb，直接用 `packages/TrollAutoClicker.dylib` 即可。
+>
+> 云端已编译成功（run 44724162610，success）。本仓库推送到 `autoclicker-build` 分支后 Actions 会自动重新编译并覆盖 Release 直链。
 
 ## 注入与使用
 
