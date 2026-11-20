@@ -1,12 +1,15 @@
 import SwiftUI
+import UIKit
 
 struct TodayView: View {
     @EnvironmentObject private var store: LedgerStore
     @EnvironmentObject private var sync: SyncManager
     @State private var toast: String?
     @State private var detailServer: ServerIdent? = nil
-
-    private let today = PushParser.todayKey()
+    /// 当前日期 key。App 后台挂起跨天后视图不会重建，若用 let 常量会永远停在
+    /// 初始化那天的日期 → 回前台后仍显示昨天数据（而同步时间已更新为今天）。
+    /// 这里用 @State，并在视图出现/回前台/系统日期变化时刷新，确保跨天后自动切到今天。
+    @State private var today: String = PushParser.todayKey()
 
     private var todayPersons: [CheckoutPerson] {
         store.persons.filter { $0.dateKey == today }
@@ -56,6 +59,14 @@ struct TodayView: View {
             .navigationTitle("今日结账")
             .navigationBarTitleDisplayMode(.inline)
             .toast($toast)
+            // 跨天/回前台时刷新「今天」：后台挂起的视图不会重建，必须主动更新日期 key
+            .onAppear { today = PushParser.todayKey() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                today = PushParser.todayKey()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                today = PushParser.todayKey()
+            }
             .sheet(item: $detailServer) { item in
                 ServerDetailView(server: item.value,
                                  persons: todayPersons.filter { $0.server == item.value },
