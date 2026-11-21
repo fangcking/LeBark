@@ -11,6 +11,9 @@ struct PeopleView: View {
     // 多选模式：勾选若干人后批量改结账状态
     @State private var selectionMode = false
     @State private var selectedIDs: Set<UUID> = []
+    // 仅进后台时为 true：把金额挪到名字后面，让多任务卡片快照能看到名字+金额。
+    // 前台保持原布局（金额在最右侧），回前台自动恢复。
+    @State private var compactAmountForBackground = false
 
     enum Filter: String, CaseIterable { case unchecked = "未结账", checked = "已结账", all = "全部" }
     enum DateFilter: String, CaseIterable { case week = "本周", month = "本月", today = "今天", all = "所有日期" }
@@ -168,6 +171,13 @@ struct PeopleView: View {
                 }
             }
             .toast($toast)
+            // 进后台前把金额挪到名字旁（后台卡片快照能看到），回前台恢复右侧原布局
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                compactAmountForBackground = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                compactAmountForBackground = false
+            }
         }
     }
 
@@ -204,9 +214,17 @@ struct PeopleView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     CopyNameButton(name: p.name)
+                    // 后台快照：金额紧跟名字，避免右侧被相邻卡片遮挡看不到
+                    if compactAmountForBackground {
+                        Text(String(format: "¥%.2f", p.amount))
+                            .font(.system(size: 14, weight: .bold)).foregroundColor(.brandOrange).monospacedDigit()
+                    }
                     Spacer(minLength: 0)
-                    Text(String(format: "¥%.2f", p.amount))
-                        .font(.system(size: 14, weight: .bold)).foregroundColor(.brandOrange).monospacedDigit()
+                    // 前台：保持原布局，金额在最右侧
+                    if !compactAmountForBackground {
+                        Text(String(format: "¥%.2f", p.amount))
+                            .font(.system(size: 14, weight: .bold)).foregroundColor(.brandOrange).monospacedDigit()
+                    }
                 }
                 HStack(spacing: 10) {
                     Text("金 \(p.coins)").font(.system(size: 11)).foregroundColor(.subtle)
