@@ -389,14 +389,15 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
         CGPoint saved = _session.bubbleCenter;
         UIEdgeInsets insets = self.view.safeAreaInsets;
         _bubble.center = CGPointEqualToPoint(saved, CGPointZero)
-            ? CGPointMake(size.width - insets.right - 40, insets.top + size.height * 0.3)
+            ? CGPointMake(size.width - insets.right - 30, insets.top + size.height * 0.3)
             : saved;
     }
     if (!CGSizeEqualToSize(size, _lastSize)) {
         _lastSize = size;
         CGRect area = UIEdgeInsetsInsetRect(self.view.bounds, self.view.safeAreaInsets);
-        _bubble.center = CGPointMake(MIN(MAX(_bubble.center.x, CGRectGetMinX(area) + 39), CGRectGetMaxX(area) - 39),
-                                     MIN(MAX(_bubble.center.y, CGRectGetMinY(area) + 39), CGRectGetMaxY(area) - 39));
+        CGFloat half = _bubble.bounds.size.width / 2 + 10;
+        _bubble.center = CGPointMake(MIN(MAX(_bubble.center.x, CGRectGetMinX(area) + half), CGRectGetMaxX(area) - half),
+                                     MIN(MAX(_bubble.center.y, CGRectGetMinY(area) + half), CGRectGetMaxY(area) - half));
         [self rebuildMarkers];
     }
 }

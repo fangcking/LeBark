@@ -5,7 +5,7 @@
 NSString *const ATOverlayKeyboardWillShowNotification = @"ATOverlayKeyboardWillShowNotification";
 NSString *const ATOverlayKeyboardDidHideNotification = @"ATOverlayKeyboardDidHideNotification";
 
-static const CGFloat kBubbleSize = 58;
+static const CGFloat kBubbleSize = 44;
 static const CGFloat kEdgeMargin = 10;
 static const CGFloat kStepRowHeight = 50;
 static const CGFloat kVisibleStepRows = 3.5;
@@ -67,11 +67,11 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:CGRectMake(0, 0, kBubbleSize, kBubbleSize)])) {
         self.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.layer.shadowOpacity = 0.35;
-        self.layer.shadowRadius = 10;
-        self.layer.shadowOffset = CGSizeMake(0, 4);
+        self.layer.shadowOpacity = 0.18;
+        self.layer.shadowRadius = 6;
+        self.layer.shadowOffset = CGSizeMake(0, 2);
 
-        _blur = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark]];
+        _blur = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];
         _blur.frame = self.bounds;
         _blur.layer.cornerRadius = kBubbleSize / 2;
         _blur.clipsToBounds = YES;
@@ -81,20 +81,20 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         _tint = [[UIView alloc] initWithFrame:self.bounds];
         _tint.layer.cornerRadius = kBubbleSize / 2;
         _tint.userInteractionEnabled = NO;
-        _tint.layer.borderWidth = 2;
-        _tint.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.9].CGColor;
+        _tint.layer.borderWidth = 1;
+        _tint.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.35].CGColor;
         [self addSubview:_tint];
 
-        _icon = [[UIImageView alloc] initWithFrame:CGRectInset(self.bounds, 15, 15)];
+        _icon = [[UIImageView alloc] initWithFrame:CGRectInset(self.bounds, 12, 12)];
         _icon.contentMode = UIViewContentModeScaleAspectFit;
-        _icon.tintColor = [UIColor whiteColor];
+        _icon.tintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.85];
         [self addSubview:_icon];
 
         _ring = [CAShapeLayer layer];
         _ring.frame = self.bounds;
         _ring.path = [UIBezierPath bezierPathWithOvalInRect:CGRectInset(self.bounds, 2, 2)].CGPath;
         _ring.fillColor = [UIColor clearColor].CGColor;
-        _ring.lineWidth = 3;
+        _ring.lineWidth = 2;
         _ring.lineCap = kCALineCapRound;
         _ring.strokeEnd = 0.28;
         [self.layer addSublayer:_ring];
@@ -114,8 +114,9 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 }
 
 - (void)applyRunning:(BOOL)running {
-    _icon.image = ATSymbol(running ? @"stop.fill" : @"hand.tap.fill", 22, UIFontWeightBold);
-    _tint.backgroundColor = running ? [ATStopColor() colorWithAlphaComponent:0.92] : [ATTapColor() colorWithAlphaComponent:0.92];
+    _icon.image = ATSymbol(running ? @"stop.fill" : @"hand.tap.fill", 16, UIFontWeightBold);
+    // 平时只透一点点蓝；运行时用稍浓的红以便区分状态
+    _tint.backgroundColor = running ? [ATStopColor() colorWithAlphaComponent:0.40] : [ATTapColor() colorWithAlphaComponent:0.26];
     _ring.strokeColor = ATGoColor().CGColor;
     _ring.hidden = !running;
     [_ring removeAllAnimations];
