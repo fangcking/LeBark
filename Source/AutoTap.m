@@ -311,6 +311,7 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
 
     [self wireCallbacks];
     [self rebuildMarkers];
+    [self applyTouchVisibility];
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserver:self selector:@selector(keyboardWillShowForPanel:)
@@ -352,6 +353,7 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
     _panel.onClose = ^{ [weakSelf setPanelVisible:NO]; };
     _panel.onRecord = ^{ [weakSelf setRecording:YES]; };
     _panel.onToggleRun = ^{ [weakSelf toggleRun]; };
+    _panel.onTouchesChanged = ^(BOOL shown) { [weakSelf applyTouchVisibility]; };
 
     _recordView.onTap = ^(CGPoint point) {
         ATOverlayViewController *strongSelf = weakSelf;
@@ -485,6 +487,20 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
     });
 }
 
+// “显示触摸”开关：同时控制编号圆点/箭头和点击涟漪，让开关效果一眼可见。
+- (void)applyTouchVisibility {
+    BOOL show = _session.showTouches;
+    _markerLayer.hidden = !show;
+    _effectLayer.hidden = !show;
+    if (!show) {
+        // 关掉时立即清除正在播放的涟漪/轨迹，避免残留一闪而过的动画。
+        [_effectLayer.layer removeAllAnimations];
+        for (CALayer *sub in [_effectLayer.layer.sublayers copy]) {
+            [sub removeFromSuperlayer];
+        }
+    }
+}
+
 - (void)runStateChanged {
     BOOL running = _session.running;
     _bubble.running = running;
@@ -554,6 +570,7 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
         marker.userInteractionEnabled = !_session.running;
     }
     [self redrawArrows];
+    [self applyTouchVisibility];
 }
 
 - (void)redrawArrows {

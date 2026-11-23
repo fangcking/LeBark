@@ -851,6 +851,9 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 - (void)touchesChanged {
     _session.showTouches = _touchesSwitch.on;
+    if (self.onTouchesChanged) {
+        self.onTouchesChanged(_touchesSwitch.on);
+    }
 }
 
 - (void)recordTapped {

@@ -45,6 +45,7 @@ UIColor *ATCardColor(void);
 @property (nonatomic, copy, nullable) void (^onRecord)(void);
 @property (nonatomic, copy, nullable) void (^onClose)(void);
 @property (nonatomic, copy, nullable) void (^onToggleRun)(void);
+@property (nonatomic, copy, nullable) void (^onTouchesChanged)(BOOL shown);
 - (void)reloadSteps;
 - (void)updateRunState;
 - (void)highlightStep:(NSInteger)index;
