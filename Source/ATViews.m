@@ -58,7 +58,6 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 #pragma mark - Bubble
 
 @implementation ATBubbleView {
-    UIVisualEffectView *_blur;
     UIView *_tint;
     UIImageView *_icon;
     CAShapeLayer *_ring;
@@ -66,28 +65,22 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:CGRectMake(0, 0, kBubbleSize, kBubbleSize)])) {
+        // 极淡阴影：只提供一点轮廓感，不遮挡底色
         self.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.layer.shadowOpacity = 0.18;
-        self.layer.shadowRadius = 6;
-        self.layer.shadowOffset = CGSizeMake(0, 2);
+        self.layer.shadowOpacity = 0.08;
+        self.layer.shadowRadius = 4;
+        self.layer.shadowOffset = CGSizeMake(0, 1);
 
-        _blur = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark]];
-        _blur.frame = self.bounds;
-        _blur.layer.cornerRadius = kBubbleSize / 2;
-        _blur.clipsToBounds = YES;
-        _blur.userInteractionEnabled = NO;
-        [self addSubview:_blur];
-
+        // 真正半透明的淡色圆。绝不使用磨砂(UIVisualEffectView)——磨砂是不透明的，
+        // 会把底下内容糊成深色，那就成了"深蓝球"而不是"透出底下的一点蓝"。
         _tint = [[UIView alloc] initWithFrame:self.bounds];
         _tint.layer.cornerRadius = kBubbleSize / 2;
         _tint.userInteractionEnabled = NO;
         _tint.layer.borderWidth = 1;
-        _tint.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.35].CGColor;
         [self addSubview:_tint];
 
         _icon = [[UIImageView alloc] initWithFrame:CGRectInset(self.bounds, 12, 12)];
         _icon.contentMode = UIViewContentModeScaleAspectFit;
-        _icon.tintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.85];
         [self addSubview:_icon];
 
         _ring = [CAShapeLayer layer];
@@ -115,8 +108,12 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 - (void)applyRunning:(BOOL)running {
     _icon.image = ATSymbol(running ? @"stop.fill" : @"hand.tap.fill", 16, UIFontWeightBold);
-    // 平时只透一点点蓝；运行时用稍浓的红以便区分状态
-    _tint.backgroundColor = running ? [ATStopColor() colorWithAlphaComponent:0.40] : [ATTapColor() colorWithAlphaComponent:0.26];
+    UIColor *base = running ? ATStopColor() : ATTapColor();
+    // 真正透出底下的淡色：平时淡蓝 alpha 0.16、运行淡红 alpha 0.24。
+    // 不用磨砂底，所以底下内容能看穿；图标用实色，浅色背景上也看得清。
+    _tint.backgroundColor = [base colorWithAlphaComponent:running ? 0.24 : 0.16];
+    _tint.layer.borderColor = [base colorWithAlphaComponent:0.45].CGColor;
+    _icon.tintColor = [base colorWithAlphaComponent:0.95];
     _ring.strokeColor = ATGoColor().CGColor;
     _ring.hidden = !running;
     [_ring removeAllAnimations];
