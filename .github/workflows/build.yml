@@ -50,21 +50,25 @@ jobs:
           echo "===== 产物 ====="
           ls -lh packages/*.deb
 
-      - name: Collect deb
+      - name: Collect deb and dylib
         id: deb
         run: |
           set -e
           DEB=$(find packages -name '*.deb' | head -n 1)
           test -n "$DEB"
           cp "$DEB" TrollAutoClicker.deb
-          ls -lh TrollAutoClicker.deb
+          DYLIB=$(find .theos -name 'TrollAutoClicker.dylib' | head -n 1)
+          if [ -n "$DYLIB" ]; then cp "$DYLIB" TrollAutoClicker.dylib; fi
+          ls -lh TrollAutoClicker.deb TrollAutoClicker.dylib 2>/dev/null || true
           file TrollAutoClicker.deb
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TrollAutoClicker-DEB
-          path: TrollAutoClicker.deb
+          path: |
+            TrollAutoClicker.deb
+            TrollAutoClicker.dylib
           if-no-files-found: error
 
       - name: Publish deb to GitHub Release (公开直链下载)
@@ -76,8 +80,9 @@ jobs:
           gh release delete "$TAG" --yes >/dev/null 2>&1 || true
           git tag -f "$TAG" >/dev/null 2>&1 || true
           git push -f origin "$TAG" >/dev/null 2>&1 || true
-          gh release create "$TAG" TrollAutoClicker.deb \
+          gh release create "$TAG" TrollAutoClicker.deb TrollAutoClicker.dylib \
             --title "TrollAutoClicker 连点器（巨魔 deb）" \
-            --notes "Theos 云编译 rootless deb，内含 TrollAutoClicker.dylib。用 TrollFools 注入目标 App。" \
+            --notes "Theos 云编译 rootless deb/dylib。每步独立延时（默认 500ms）+ 步骤上下调整 + 点击触摸序列修复。用 TrollFools 注入目标 App。" \
             --target "$GITHUB_SHA"
           echo "DEB 直链： https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/TrollAutoClicker.deb"
+          echo "DYLIB 直链： https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/TrollAutoClicker.dylib"

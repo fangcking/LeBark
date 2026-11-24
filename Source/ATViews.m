@@ -7,11 +7,10 @@ NSString *const ATOverlayKeyboardDidHideNotification = @"ATOverlayKeyboardDidHid
 
 static const CGFloat kBubbleSize = 44;
 static const CGFloat kEdgeMargin = 10;
-static const CGFloat kStepRowHeight = 50;
-static const CGFloat kVisibleStepRows = 3.5;
+static const CGFloat kStepRowHeight = 78;
+static const CGFloat kVisibleStepRows = 3.2;
 
 // Slider position 0...1 maps exponentially onto seconds, for fine control at the low end.
-static const NSTimeInterval kMinDelay = 0.05, kMaxDelay = 10;
 static const NSTimeInterval kMinSwipeTime = 0.05, kMaxSwipeTime = 3;
 
 UIColor *ATTapColor(void) { return [UIColor colorWithRed:0.30 green:0.58 blue:1.00 alpha:1]; }
@@ -266,11 +265,11 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     NSLayoutConstraint *_stepsHeight;
     UILabel *_emptyLabel;
     NSMutableArray<UIView *> *_rows;
+    NSMutableArray<UITextField *> *_delayFields; // 每一步的延时输入框
     NSInteger _highlighted;
-    UITextField *_tapIntervalField;          // 点击间隔输入框，单位毫秒
     UITextField *_loopCountField;            // 循环次数输入框，0/留空 = 无限循环
-    UISlider *_swipeDelaySlider, *_swipeTimeSlider;
-    UILabel *_swipeDelayValue, *_swipeTimeValue;
+    UISlider *_swipeTimeSlider;
+    UILabel *_swipeTimeValue;
     UISwitch *_touchesSwitch;
     ATGradientButton *_runButton;
     UILabel *_statusLabel;
@@ -280,6 +279,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     if ((self = [super initWithFrame:CGRectZero])) {
         _session = session;
         _rows = [NSMutableArray array];
+        _delayFields = [NSMutableArray array];
         _highlighted = -1;
         self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         self.layer.shadowColor = [UIColor blackColor].CGColor;
@@ -500,60 +500,6 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     return row;
 }
 
-// 毫秒输入框：比滑杆更适合精确输入点击间隔。
-- (UIView *)intervalRow {
-    UILabel *label = [[UILabel alloc] init];
-    label.text = @"点击间隔";
-    label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-    label.textColor = ATTextColor();
-
-    UIView *box = [[UIView alloc] init];
-    box.backgroundColor = ATCardColor();
-    box.layer.cornerRadius = 10;
-    box.layer.cornerCurve = kCACornerCurveContinuous;
-    box.clipsToBounds = YES;
-
-    UITextField *field = [[UITextField alloc] init];
-    field.keyboardType = UIKeyboardTypeNumberPad;
-    field.returnKeyType = UIReturnKeyDone;
-    field.textAlignment = NSTextAlignmentRight;
-    field.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightSemibold];
-    field.textColor = ATTapColor();
-    field.borderStyle = UITextBorderStyleNone;
-    field.text = [NSString stringWithFormat:@"%ld", (long)_session.tapIntervalMs];
-    field.delegate = self;
-    field.returnKeyType = UIReturnKeyDone;
-    [field addTarget:self action:@selector(intervalChanged:) forControlEvents:UIControlEventEditingChanged];
-    [field addTarget:self action:@selector(intervalDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
-    [field addTarget:self action:@selector(intervalDone:) forControlEvents:UIControlEventEditingDidEnd];
-    [field.widthAnchor constraintEqualToConstant:70].active = YES;
-
-    UILabel *unit = [[UILabel alloc] init];
-    unit.text = @"ms";
-    unit.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    unit.textColor = ATSecondaryTextColor();
-
-    UIStackView *input = [[UIStackView alloc] initWithArrangedSubviews:@[field, unit]];
-    input.axis = UILayoutConstraintAxisHorizontal;
-    input.alignment = UIStackViewAlignmentCenter;
-    input.spacing = 4;
-    input.layoutMargins = UIEdgeInsetsMake(0, 10, 0, 10);
-    input.layoutMarginsRelativeArrangement = YES;
-    input.translatesAutoresizingMaskIntoConstraints = NO;
-    [box addSubview:input];
-    [NSLayoutConstraint activateConstraints:@[
-        [input.topAnchor constraintEqualToAnchor:box.topAnchor constant:6],
-        [input.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-6],
-        [input.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
-        [input.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
-    ]];
-    _tapIntervalField = field;
-
-    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[label, [UIView new], box]];
-    row.alignment = UIStackViewAlignmentCenter;
-    return row;
-}
-
 // 循环次数输入框：直接输入数字，0 或留空表示无限循环。
 - (UIView *)loopRow {
     UILabel *label = [[UILabel alloc] init];
@@ -619,10 +565,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 }
 
 - (UIView *)timingSection {
-    UIView *tapRow = [self intervalRow];
-    UIView *swipeDelayRow = [self sliderRowWithTitle:@"滑动后延时" slider:&_swipeDelaySlider value:&_swipeDelayValue tint:ATSwipeColor()];
     UIView *swipeTimeRow = [self sliderRowWithTitle:@"滑动时长" slider:&_swipeTimeSlider value:&_swipeTimeValue tint:ATSwipeColor()];
-    _swipeDelaySlider.value = ATSliderValue(_session.swipeDelay, kMinDelay, kMaxDelay);
     _swipeTimeSlider.value = ATSliderValue(_session.swipeDuration, kMinSwipeTime, kMaxSwipeTime);
 
     UIView *loopRow = [self loopRow];
@@ -639,7 +582,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     touchesRow.alignment = UIStackViewAlignmentCenter;
 
     [self refreshTimingLabels];
-    UIStackView *section = [[UIStackView alloc] initWithArrangedSubviews:@[[self sectionLabel:@"时序"], tapRow, swipeDelayRow, swipeTimeRow, loopRow, touchesRow]];
+    UIStackView *section = [[UIStackView alloc] initWithArrangedSubviews:@[[self sectionLabel:@"时序"], swipeTimeRow, loopRow, touchesRow]];
     section.axis = UILayoutConstraintAxisVertical;
     section.spacing = 12;
     [section setCustomSpacing:6 afterView:section.arrangedSubviews.firstObject];
@@ -688,25 +631,95 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     title.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     title.textColor = ATTextColor();
     UILabel *detail = [[UILabel alloc] init];
-    detail.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium];
+    detail.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
     detail.textColor = ATSecondaryTextColor();
     detail.text = swipe
-        ? [NSString stringWithFormat:@"%.0f, %.0f  →  %.0f, %.0f", action.start.x, action.start.y, action.end.x, action.end.y]
-        : [NSString stringWithFormat:@"x %.0f   y %.0f", action.start.x, action.start.y];
+        ? [NSString stringWithFormat:@"%.0f,%.0f → %.0f,%.0f", action.start.x, action.start.y, action.end.x, action.end.y]
+        : [NSString stringWithFormat:@"x %.0f  y %.0f", action.start.x, action.start.y];
     UIStackView *texts = [[UIStackView alloc] initWithArrangedSubviews:@[title, detail]];
     texts.axis = UILayoutConstraintAxisVertical;
+
+    // 上移 / 下移：调整步骤的执行顺序和点位位置
+    UIButton *up = [UIButton buttonWithType:UIButtonTypeSystem];
+    [up setImage:ATSymbol(@"chevron.up", 16, UIFontWeightBold) forState:UIControlStateNormal];
+    up.tintColor = ATSecondaryTextColor();
+    up.tag = index;
+    up.enabled = index > 0;
+    [up addTarget:self action:@selector(moveUpTapped:) forControlEvents:UIControlEventTouchUpInside];
+
+    UIButton *down = [UIButton buttonWithType:UIButtonTypeSystem];
+    [down setImage:ATSymbol(@"chevron.down", 16, UIFontWeightBold) forState:UIControlStateNormal];
+    down.tintColor = ATSecondaryTextColor();
+    down.tag = index;
+    down.enabled = index < (NSInteger)_session.actions.count - 1;
+    [down addTarget:self action:@selector(moveDownTapped:) forControlEvents:UIControlEventTouchUpInside];
 
     UIButton *remove = [UIButton buttonWithType:UIButtonTypeSystem];
     [remove setImage:ATSymbol(@"minus.circle.fill", 20, UIFontWeightSemibold) forState:UIControlStateNormal];
     remove.tintColor = ATMutedTextColor();
     remove.tag = index;
     [remove addTarget:self action:@selector(removeTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [remove setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
-    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[badge, texts, remove]];
-    row.alignment = UIStackViewAlignmentCenter;
-    row.spacing = 12;
-    row.layoutMargins = UIEdgeInsetsMake(0, 12, 0, 12);
+    UIStackView *top = [[UIStackView alloc] initWithArrangedSubviews:@[badge, texts, [UIView new], up, down, remove]];
+    top.alignment = UIStackViewAlignmentCenter;
+    top.spacing = 8;
+
+    // 本步骤独立延时输入框
+    UILabel *delayLabel = [[UILabel alloc] init];
+    delayLabel.text = @"此步后延时";
+    delayLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    delayLabel.textColor = ATSecondaryTextColor();
+
+    UIView *delayBox = [[UIView alloc] init];
+    delayBox.backgroundColor = ATCardColor();
+    delayBox.layer.cornerRadius = 8;
+    delayBox.layer.cornerCurve = kCACornerCurveContinuous;
+    delayBox.clipsToBounds = YES;
+
+    UITextField *delayField = [[UITextField alloc] init];
+    delayField.keyboardType = UIKeyboardTypeNumberPad;
+    delayField.returnKeyType = UIReturnKeyDone;
+    delayField.textAlignment = NSTextAlignmentRight;
+    delayField.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold];
+    delayField.textColor = color;
+    delayField.borderStyle = UITextBorderStyleNone;
+    delayField.text = [NSString stringWithFormat:@"%ld", (long)action.delayMs];
+    delayField.delegate = self;
+    delayField.tag = index;
+    [delayField.widthAnchor constraintEqualToConstant:64].active = YES;
+    [delayField addTarget:self action:@selector(stepDelayChanged:) forControlEvents:UIControlEventEditingChanged];
+    [delayField addTarget:self action:@selector(stepDelayDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
+    [delayField addTarget:self action:@selector(stepDelayDone:) forControlEvents:UIControlEventEditingDidEnd];
+
+    UILabel *unit = [[UILabel alloc] init];
+    unit.text = @"ms";
+    unit.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    unit.textColor = ATSecondaryTextColor();
+
+    UIStackView *delayInput = [[UIStackView alloc] initWithArrangedSubviews:@[delayField, unit]];
+    delayInput.axis = UILayoutConstraintAxisHorizontal;
+    delayInput.alignment = UIStackViewAlignmentCenter;
+    delayInput.spacing = 4;
+    delayInput.layoutMargins = UIEdgeInsetsMake(0, 8, 0, 8);
+    delayInput.layoutMarginsRelativeArrangement = YES;
+    delayInput.translatesAutoresizingMaskIntoConstraints = NO;
+    [delayBox addSubview:delayInput];
+    [NSLayoutConstraint activateConstraints:@[
+        [delayInput.topAnchor constraintEqualToAnchor:delayBox.topAnchor constant:3],
+        [delayInput.bottomAnchor constraintEqualToAnchor:delayBox.bottomAnchor constant:-3],
+        [delayInput.leadingAnchor constraintEqualToAnchor:delayBox.leadingAnchor],
+        [delayInput.trailingAnchor constraintEqualToAnchor:delayBox.trailingAnchor],
+    ]];
+    [_delayFields addObject:delayField];
+
+    UIStackView *bottom = [[UIStackView alloc] initWithArrangedSubviews:@[delayLabel, [UIView new], delayBox]];
+    bottom.alignment = UIStackViewAlignmentCenter;
+    bottom.spacing = 8;
+
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[top, bottom]];
+    row.axis = UILayoutConstraintAxisVertical;
+    row.spacing = 6;
+    row.layoutMargins = UIEdgeInsetsMake(8, 12, 8, 12);
     row.layoutMarginsRelativeArrangement = YES;
     [row.heightAnchor constraintEqualToConstant:kStepRowHeight].active = YES;
     return row;
@@ -717,6 +730,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         [row removeFromSuperview];
     }
     [_rows removeAllObjects];
+    [_delayFields removeAllObjects];
     NSArray<ATAction *> *actions = _session.actions;
     NSInteger taps = 0;
     for (NSInteger i = 0; i < (NSInteger)actions.count; i++) {
@@ -788,21 +802,35 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 #pragma mark Controls
 
 - (void)refreshTimingLabels {
-    if (!_tapIntervalField.isEditing) {
-        _tapIntervalField.text = [NSString stringWithFormat:@"%ld", (long)_session.tapIntervalMs];
-    }
-    _swipeDelayValue.text = ATFormatSeconds(_session.swipeDelay);
     _swipeTimeValue.text = ATFormatSeconds(_session.swipeDuration);
     if (!_loopCountField.isEditing) {
         _loopCountField.text = _session.loopCount ? [NSString stringWithFormat:@"%ld", (long)_session.loopCount] : @"";
     }
+    // 刷新每步延时显示（编辑中的那一个不覆盖，避免打断输入）
+    NSArray<ATAction *> *actions = _session.actions;
+    for (NSInteger i = 0; i < (NSInteger)_delayFields.count && i < (NSInteger)actions.count; i++) {
+        UITextField *field = _delayFields[i];
+        if (!field.isEditing) {
+            field.text = [NSString stringWithFormat:@"%ld", (long)actions[i].delayMs];
+        }
+    }
 }
 
-- (void)intervalChanged:(UITextField *)field {
+// 每一步独立延时：就地改模型并保存，不重建整行（否则键盘会被收起）。
+- (void)stepDelayChanged:(UITextField *)field {
+    NSInteger index = field.tag;
+    NSArray<ATAction *> *actions = _session.actions;
+    if (index < 0 || index >= (NSInteger)actions.count) {
+        return;
+    }
     NSInteger value = [field.text integerValue];
-    if (value < 10) value = 10;
-    if (value > 60000) value = 60000;
-    _session.tapIntervalMs = value;
+    actions[index].delayMs = MIN(MAX(value, 10), 60000);
+    [_session save];
+}
+
+- (void)stepDelayDone:(UITextField *)field {
+    [field resignFirstResponder];
+    [self refreshTimingLabels];
 }
 
 // 悬浮窗默认不是 keyWindow，直接 becomeFirstResponder 键盘不会弹。
@@ -816,17 +844,8 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     [[NSNotificationCenter defaultCenter] postNotificationName:ATOverlayKeyboardDidHideNotification object:self];
 }
 
-- (void)intervalDone:(UITextField *)field {
-    [field resignFirstResponder];
-    [self refreshTimingLabels];
-}
-
 - (void)sliderChanged:(UISlider *)slider {
-    if (slider == _swipeDelaySlider) {
-        _session.swipeDelay = ATSeconds(slider.value, kMinDelay, kMaxDelay);
-    } else {
-        _session.swipeDuration = ATSeconds(slider.value, kMinSwipeTime, kMaxSwipeTime);
-    }
+    _session.swipeDuration = ATSeconds(slider.value, kMinSwipeTime, kMaxSwipeTime);
     [self refreshTimingLabels];
 }
 
@@ -869,6 +888,14 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 - (void)removeTapped:(UIButton *)button {
     [_session removeActionAtIndex:button.tag];
+}
+
+- (void)moveUpTapped:(UIButton *)button {
+    [_session moveActionAtIndex:button.tag byOffset:-1];
+}
+
+- (void)moveDownTapped:(UIButton *)button {
+    [_session moveActionAtIndex:button.tag byOffset:1];
 }
 
 - (void)closeTapped {

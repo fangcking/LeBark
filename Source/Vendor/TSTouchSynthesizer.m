@@ -10,7 +10,7 @@ static const NSInteger kGestureSearchDepth = 8;
 static const CGFloat kMinimumVisibleAlpha = 0.01;
 static const CGFloat kOffsetEpsilon = 0.5;
 static const CGFloat kWindowLevelEpsilon = 0.001;
-static const NSTimeInterval kDefaultTapDuration = 0.05;
+static const NSTimeInterval kDefaultTapDuration = 0.08;
 static const NSTimeInterval kSwipeStepInterval = 1.0 / 60.0;
 static const NSInteger kFirstGeneratedIdentifier = 1 << 20;
 
@@ -807,7 +807,11 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
 }
 
 - (void)tapAtPoint:(CGPoint)point duration:(NSTimeInterval)duration completion:(void (^)(BOOL))completion {
-    [self swipeFromPoint:point toPoint:point duration:duration completion:completion];
+    // Some apps ignore a touch that never emits touchesMoved:. Route taps through
+    // the swipe path with a tiny sub-slop nudge so the sequence is
+    // began -> moved -> ended, while still being classified as a tap (< 12pt).
+    CGPoint nudge = CGPointMake(point.x + 1.0, point.y + 1.0);
+    [self swipeFromPoint:point toPoint:nudge duration:duration completion:completion];
 }
 
 - (void)swipeFromPoint:(CGPoint)from toPoint:(CGPoint)to duration:(NSTimeInterval)duration completion:(void (^)(BOOL))completion {

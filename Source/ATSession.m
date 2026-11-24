@@ -4,6 +4,7 @@
 
 static NSString *const kDefaultsKey = @"com.trollautoclicker.v1";
 static const NSTimeInterval kTapHoldTime = 0.05;
+static const NSInteger kDefaultDelayMs = 500;
 
 @interface ATAction ()
 - (NSDictionary *)dictionary;
@@ -17,6 +18,7 @@ static const NSTimeInterval kTapHoldTime = 0.05;
     action.type = ATActionTypeTap;
     action.start = point;
     action.end = point;
+    action.delayMs = kDefaultDelayMs;
     return action;
 }
 
@@ -25,6 +27,7 @@ static const NSTimeInterval kTapHoldTime = 0.05;
     action.type = ATActionTypeSwipe;
     action.start = start;
     action.end = end;
+    action.delayMs = kDefaultDelayMs;
     return action;
 }
 
@@ -33,6 +36,7 @@ static const NSTimeInterval kTapHoldTime = 0.05;
         @"type": @(self.type),
         @"x1": @(self.start.x), @"y1": @(self.start.y),
         @"x2": @(self.end.x), @"y2": @(self.end.y),
+        @"delayMs": @(self.delayMs),
     };
 }
 
@@ -44,6 +48,8 @@ static const NSTimeInterval kTapHoldTime = 0.05;
     action.type = [dictionary[@"type"] integerValue] == ATActionTypeSwipe ? ATActionTypeSwipe : ATActionTypeTap;
     action.start = CGPointMake([dictionary[@"x1"] doubleValue], [dictionary[@"y1"] doubleValue]);
     action.end = CGPointMake([dictionary[@"x2"] doubleValue], [dictionary[@"y2"] doubleValue]);
+    NSInteger delay = dictionary[@"delayMs"] ? [dictionary[@"delayMs"] integerValue] : kDefaultDelayMs;
+    action.delayMs = MIN(MAX(delay, 10), 60000);
     return action;
 }
 
@@ -67,9 +73,6 @@ static const NSTimeInterval kTapHoldTime = 0.05;
 - (instancetype)init {
     if ((self = [super init])) {
         _actions = [NSMutableArray array];
-        _tapIntervalMs = 500;
-        _tapDelay = 0.5;
-        _swipeDelay = 0.8;
         _swipeDuration = 0.25;
         _loopCount = 0;
         _showTouches = YES;
@@ -99,14 +102,6 @@ static const NSTimeInterval kTapHoldTime = 0.05;
             [_actions addObject:action];
         }
     }
-    if (saved[@"tapIntervalMs"]) {
-        _tapIntervalMs = [saved[@"tapIntervalMs"] integerValue];
-    } else if (saved[@"tapDelay"]) {
-        _tapIntervalMs = (NSInteger)([saved[@"tapDelay"] doubleValue] * 1000 + 0.5);
-    }
-    _tapIntervalMs = MIN(MAX(_tapIntervalMs, 10), 60000);
-    _tapDelay = _tapIntervalMs / 1000.0;
-    if (saved[@"swipeDelay"]) _swipeDelay = [saved[@"swipeDelay"] doubleValue];
     if (saved[@"swipeDuration"]) _swipeDuration = [saved[@"swipeDuration"] doubleValue];
     if (saved[@"loopCount"]) _loopCount = [saved[@"loopCount"] integerValue];
     if (saved[@"showTouches"]) _showTouches = [saved[@"showTouches"] boolValue];
@@ -120,9 +115,6 @@ static const NSTimeInterval kTapHoldTime = 0.05;
     }
     [[NSUserDefaults standardUserDefaults] setObject:@{
         @"actions": actions,
-        @"tapDelay": @(_tapDelay),
-        @"tapIntervalMs": @(_tapIntervalMs),
-        @"swipeDelay": @(_swipeDelay),
         @"swipeDuration": @(_swipeDuration),
         @"loopCount": @(_loopCount),
         @"showTouches": @(_showTouches),
@@ -140,20 +132,6 @@ static const NSTimeInterval kTapHoldTime = 0.05;
 
 #pragma mark Editing
 
-- (void)setTapDelay:(NSTimeInterval)tapDelay {
-    _tapDelay = tapDelay;
-    _tapIntervalMs = (NSInteger)(tapDelay * 1000 + 0.5);
-    [self save];
-}
-
-- (void)setTapIntervalMs:(NSInteger)tapIntervalMs {
-    tapIntervalMs = MIN(MAX(tapIntervalMs, 10), 60000);
-    _tapIntervalMs = tapIntervalMs;
-    _tapDelay = tapIntervalMs / 1000.0;
-    [self save];
-}
-
-- (void)setSwipeDelay:(NSTimeInterval)swipeDelay { _swipeDelay = swipeDelay; [self save]; }
 - (void)setSwipeDuration:(NSTimeInterval)swipeDuration { _swipeDuration = swipeDuration; [self save]; }
 - (void)setLoopCount:(NSInteger)loopCount { _loopCount = loopCount; [self save]; }
 - (void)setShowTouches:(BOOL)showTouches { _showTouches = showTouches; [self save]; }
@@ -176,6 +154,19 @@ static const NSTimeInterval kTapHoldTime = 0.05;
 
 - (void)removeLastAction {
     [self removeActionAtIndex:(NSInteger)_actions.count - 1];
+}
+
+- (BOOL)moveActionAtIndex:(NSInteger)index byOffset:(NSInteger)offset {
+    NSInteger target = index + offset;
+    if (index < 0 || index >= (NSInteger)_actions.count || target < 0 || target >= (NSInteger)_actions.count) {
+        return NO;
+    }
+    [self stop];
+    ATAction *action = _actions[index];
+    [_actions removeObjectAtIndex:index];
+    [_actions insertObject:action atIndex:target];
+    [self changed];
+    return YES;
 }
 
 - (void)removeAllActions {
@@ -249,7 +240,7 @@ static const NSTimeInterval kTapHoldTime = 0.05;
         if (strongSelf.onStepFinish) {
             strongSelf.onStepFinish(index, action, reachedTarget);
         }
-        NSTimeInterval delay = action.type == ATActionTypeSwipe ? strongSelf.swipeDelay : strongSelf.tapDelay;
+        NSTimeInterval delay = action.delayMs / 1000.0;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             ATSession *innerSelf = weakSelf;
             if (innerSelf && generation == innerSelf->_generation) {
