@@ -27,6 +27,22 @@ static const CGFloat kEdgeMargin = 8;
     UIView *hit = [super hitTest:point withEvent:event];
     return hit == self ? nil : hit;
 }
+- (BOOL)canBecomeKeyWindow {
+    // 永远不抢 keyWindow，否则目标 App 的键盘/输入框会失效。
+    return NO;
+}
+@end
+
+// 关键：rootViewController 的 view 也必须是穿透的。
+// 普通 UIView 会命中自身并把整屏触摸吞掉，导致 App 内所有按钮点不动。
+@interface WJOverlayRootViewController : UIViewController
+@end
+@implementation WJOverlayRootViewController
+- (void)loadView {
+    WJPassthroughView *root = [[WJPassthroughView alloc] init];
+    root.backgroundColor = [UIColor clearColor];
+    self.view = root;
+}
 @end
 
 #pragma mark - Overlay 控制器
@@ -56,7 +72,7 @@ static const CGFloat kEdgeMargin = 8;
     WJOverlayWindow *win = [[WJOverlayWindow alloc] initWithFrame:screen];
     win.windowLevel = UIWindowLevelAlert + 10;
     win.backgroundColor = [UIColor clearColor];
-    win.rootViewController = [[UIViewController alloc] init];
+    win.rootViewController = [[WJOverlayRootViewController alloc] init];
 
     WJPassthroughView *root = [[WJPassthroughView alloc] initWithFrame:screen];
     [win.rootViewController.view addSubview:root];
