@@ -1,0 +1,8 @@
+Package: com.wechatjumpblocker.tweak
+Name: WeChatJumpBlocker
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Maintainer: WeChatJumpBlocker
+Author: WeChatJumpBlocker
+Section: Tweaks
+Description: 拦截 QQ音乐内跳转微信/分享到微信，让 App 认为跳转成功但实际不打开微信。带可拖动悬浮开关。通过 TrollFools 注入 QQ音乐使用。

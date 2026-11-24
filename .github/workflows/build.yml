@@ -1,0 +1,88 @@
+name: Build WeChatJumpBlocker DEB
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ wechatblocker-build ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: wechatblocker-build
+
+      - name: Install Theos and iOS SDK
+        uses: waruhachi/theos-action@v2.6.5
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+          libgcuniversal: 'false'
+          altlist: 'false'
+          remotelog: 'false'
+          comet: 'false'
+          orion: 'false'
+          shook: 'false'
+
+      - name: Brew GNU make
+        run: brew install make
+
+      - name: Build rootless deb
+        run: |
+          export PATH="/opt/homebrew/opt/make/libexec/gnubin:/usr/local/opt/make/libexec/gnubin:$PATH"
+          set +e
+          make clean
+          make package FINALPACKAGE=1 2>&1 | tee build.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== 编译错误标注 ====="
+            grep -iE "error:|fatal error|undefined symbols|ld: error" build.log | sed 's/^/::error title=编译错误::/' || true
+            echo "===== 日志末尾 120 行 ====="
+            tail -n 120 build.log
+            exit "$STATUS"
+          fi
+          echo "===== 产物 ====="
+          ls -lh packages/*.deb
+
+      - name: Collect artifacts
+        id: artifacts
+        run: |
+          set -e
+          DEB=$(find packages -name '*.deb' | head -n 1)
+          test -n "$DEB"
+          cp "$DEB" WeChatJumpBlocker.deb
+          DYLIB=$(find .theos -name 'WeChatJumpBlocker.dylib' | head -n 1)
+          if [ -n "$DYLIB" ]; then cp "$DYLIB" WeChatJumpBlocker.dylib; fi
+          ls -lh WeChatJumpBlocker.deb WeChatJumpBlocker.dylib 2>/dev/null || true
+          file WeChatJumpBlocker.deb
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeChatJumpBlocker-DEB
+          path: |
+            WeChatJumpBlocker.deb
+            WeChatJumpBlocker.dylib
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release (公开直链下载)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="wechatblocker-latest"
+          gh release delete "$TAG" --yes >/dev/null 2>&1 || true
+          git tag -f "$TAG" >/dev/null 2>&1 || true
+          git push -f origin "$TAG" >/dev/null 2>&1 || true
+          gh release create "$TAG" WeChatJumpBlocker.deb WeChatJumpBlocker.dylib \
+            --title "WeChatJumpBlocker 拦截跳微信（巨魔 dylib）" \
+            --notes "Theos 云编译 rootless dylib/deb。用 TrollFools 注入 QQ音乐，打开悬浮开关后分享到微信不会真的跳转、仍提示成功。" \
+            --target "$GITHUB_SHA"
+          echo "DEB 直链： https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/WeChatJumpBlocker.deb"
+          echo "DYLIB 直链： https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/WeChatJumpBlocker.dylib"
