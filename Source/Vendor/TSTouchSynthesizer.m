@@ -243,6 +243,10 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
     NSMutableDictionary<NSNumber *, TSTouchState *> *_states;
     NSInteger _nextIdentifier;
     NSUInteger _sequenceGeneration;
+    // The touch events of one tap/swipe sequence are dispatched serially on the
+    // main queue, so a plain flag is safe. A tap must not be delivered twice
+    // (see the direct-touch decision in deliverEvent:).
+    BOOL _currentSequenceIsTap;
 }
 
 + (TSTouchSynthesizer *)sharedSynthesizer {
@@ -522,8 +526,16 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
 
     // Controls get touches through sendEvent: only. Everything else gets them
     // directly as well, because sendEvent: alone does not reliably reach the view.
+    // A tap must reach the view exactly once. sendEvent: already hit-tests and
+    // delivers to the correct view; adding a direct touchesBegan/Ended on top
+    // duplicates the sequence. Native UIControls dedupe via TSTrackedControl,
+    // but WKWebView/WebKit has no such guard and treats the second pair as a
+    // broken gesture, dropping the H5 click entirely. For taps we therefore
+    // rely solely on sendEvent: when it succeeded, and only fall back to direct
+    // delivery if no UIEvent could be built.
     BOOL deliveredDirectly = NO;
-    if ((!dispatched || !state.control) && (options & TSDeliveryDirectTouches)) {
+    BOOL shouldDeliverDirect = !state.control && (!_currentSequenceIsTap || !dispatched);
+    if (shouldDeliverDirect && (options & TSDeliveryDirectTouches)) {
         deliveredDirectly = TSDeliverDirect(touch, view, uiEvent);
     }
 
@@ -807,15 +819,46 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
 }
 
 - (void)tapAtPoint:(CGPoint)point duration:(NSTimeInterval)duration completion:(void (^)(BOOL))completion {
-    // Some apps ignore a touch that never emits touchesMoved:. Route taps through
-    // the swipe path with a tiny sub-slop nudge so the sequence is
-    // began -> moved -> ended, while still being classified as a tap (< 12pt).
-    CGPoint nudge = CGPointMake(point.x + 1.0, point.y + 1.0);
-    [self swipeFromPoint:point toPoint:nudge duration:duration completion:completion];
+    // A tap must stay on ONE point. The previous implementation reused the swipe
+    // path with a 1pt nudge, which emitted several touchesMoved: events. Web views
+    // (WKWebView) feed those moves into WebKit's gesture recognizer, so a "tap"
+    // with movement is classified as a scroll/pan gesture and its click is
+    // silently dropped. Real finger taps do not move either.
+    //
+    // This dedicated path sends exactly began -> (hold) -> ended at the SAME
+    // point, matching what UIKit produces for a real tap. The hold makes the
+    // touch measurable so controls and WebKit both register it.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self->_currentSequenceIsTap = YES;
+        NSInteger identifier = self->_nextIdentifier++;
+        NSUInteger generation = self->_sequenceGeneration;
+        if (![self touchDownWithIdentifier:identifier atPoint:point]) {
+            if (completion) {
+                completion(NO);
+            }
+            return;
+        }
+        NSTimeInterval hold = duration > 0 ? duration : kDefaultTapDuration;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(hold * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (generation != self->_sequenceGeneration) {
+                if (completion) {
+                    completion(NO);
+                }
+                return;
+            }
+            // Same point for touchUp -> _tapCount stays 1 and touchFlags keeps
+            // kTouchFlagIsTap, which is what WebKit needs to synthesize a click.
+            BOOL finished = [self touchUpWithIdentifier:identifier atPoint:point];
+            if (completion) {
+                completion(finished);
+            }
+        });
+    });
 }
 
 - (void)swipeFromPoint:(CGPoint)from toPoint:(CGPoint)to duration:(NSTimeInterval)duration completion:(void (^)(BOOL))completion {
     dispatch_async(dispatch_get_main_queue(), ^{
+        self->_currentSequenceIsTap = NO;
         NSInteger identifier = self->_nextIdentifier++;
         NSUInteger generation = self->_sequenceGeneration;
         if (![self touchDownWithIdentifier:identifier atPoint:from]) {
