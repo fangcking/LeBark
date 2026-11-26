@@ -46,6 +46,11 @@ typedef NS_ENUM(NSInteger, ATActionType) {
 @property (nonatomic, readonly) NSInteger currentIndex;
 @property (nonatomic, readonly) NSInteger currentLoop;
 
+// 有限循环时的执行进度 0 ~ 1（按「已完成步数 / 总步数」算）；无限循环返回 -1。
+@property (nonatomic, readonly) double progress;
+// 是否已经把设定轮数跑完（用于停留在 100%）。
+@property (nonatomic, readonly) BOOL didCompleteLoops;
+
 // Steps or settings changed.
 @property (nonatomic, copy, nullable) void (^onChange)(void);
 // Running started or stopped.

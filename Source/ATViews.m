@@ -62,6 +62,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     UIView *_tint;
     UIImageView *_icon;
     CAShapeLayer *_ring;
+    UILabel *_progressLabel;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -93,6 +94,18 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         _ring.strokeEnd = 0.28;
         [self.layer addSublayer:_ring];
 
+        // 运行中的进度百分比：贴在球外侧，不参与球内布局，也不吃触摸。
+        _progressPercent = -1;
+        _progressLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _progressLabel.textAlignment = NSTextAlignmentCenter;
+        _progressLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightBold];
+        _progressLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
+        _progressLabel.layer.cornerRadius = 7;
+        _progressLabel.clipsToBounds = YES;
+        _progressLabel.hidden = YES;
+        _progressLabel.userInteractionEnabled = NO;
+        [self addSubview:_progressLabel];
+
         [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped)]];
         [self addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(dragged:)]];
         [self applyRunning:NO];
@@ -105,6 +118,39 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         _running = running;
         [self applyRunning:running];
     }
+}
+
+- (void)setProgressPercent:(double)progressPercent {
+    _progressPercent = progressPercent;
+    [self applyProgressLabel];
+}
+
+- (void)applyProgressLabel {
+    BOOL show = _running && _progressPercent >= 0;
+    _progressLabel.hidden = !show;
+    if (!show) {
+        return;
+    }
+    _progressLabel.textColor = ATStopColor();
+    _progressLabel.text = [NSString stringWithFormat:@"%ld%%", (long)lround(MIN(_progressPercent, 100))];
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (_progressLabel.hidden) {
+        return;
+    }
+    CGSize size = CGSizeMake(46, 15);
+    CGRect frame = CGRectMake((CGRectGetWidth(self.bounds) - size.width) / 2,
+                              -size.height - 3,
+                              size.width, size.height);
+    // 球贴着屏幕上边缘时翻到球下方，避免被裁掉。
+    CGRect inWindow = [self convertRect:frame toView:nil];
+    if (CGRectGetMinY(inWindow) < 2) {
+        frame.origin.y = CGRectGetHeight(self.bounds) + 3;
+    }
+    _progressLabel.frame = frame;
 }
 
 - (void)applyRunning:(BOOL)running {
@@ -126,6 +172,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         spin.repeatCount = HUGE_VALF;
         [_ring addAnimation:spin forKey:@"spin"];
     }
+    [self applyProgressLabel];
 }
 
 - (void)tapped {
@@ -256,6 +303,50 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 }
 @end
 
+#pragma mark - Progress bar
+
+// 细进度条：内部不用 Auto Layout，直接按 progress 摆 fill 的 frame，
+// 这样改百分比不需要重建约束。
+@interface ATProgressBar : UIView
+@property (nonatomic) CGFloat progress; // 0 ~ 1
+@property (nonatomic, strong) UIColor *barColor;
+@end
+
+@implementation ATProgressBar {
+    UIView *_fill;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+        self.layer.cornerRadius = 3;
+        self.clipsToBounds = YES;
+        _fill = [[UIView alloc] initWithFrame:CGRectZero];
+        _fill.backgroundColor = ATTapColor();
+        _fill.layer.cornerRadius = 3;
+        [self addSubview:_fill];
+    }
+    return self;
+}
+
+- (void)setProgress:(CGFloat)progress {
+    _progress = MIN(MAX(progress, 0), 1);
+    [self setNeedsLayout];
+}
+
+- (void)setBarColor:(UIColor *)barColor {
+    _barColor = barColor;
+    _fill.backgroundColor = barColor;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat width = CGRectGetWidth(self.bounds) * _progress;
+    _fill.frame = CGRectMake(0, 0, width, CGRectGetHeight(self.bounds));
+}
+
+@end
+
 #pragma mark - Panel
 
 @implementation ATPanelView {
@@ -275,6 +366,11 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     UISwitch *_touchesSwitch;
     ATGradientButton *_runButton;
     UILabel *_statusLabel;
+
+    // 执行进度（只在有限循环时显示，位于「开始/停止」按钮上方）
+    UIStackView *_progressBox;
+    UILabel *_progressValue;
+    ATProgressBar *_progressBar;
 
     // 方案（下拉选择）
     UILabel *_planCount;
@@ -880,9 +976,37 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     _statusLabel.textColor = ATSecondaryTextColor();
     _statusLabel.textAlignment = NSTextAlignmentCenter;
 
-    UIStackView *section = [[UIStackView alloc] initWithArrangedSubviews:@[_runButton, _statusLabel]];
+    // 进度只在「有限循环 + 有步骤」时出现，无限循环时不占位。
+    UILabel *progressTitle = [[UILabel alloc] init];
+    progressTitle.text = @"执行进度";
+    progressTitle.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    progressTitle.textColor = ATSecondaryTextColor();
+    [progressTitle setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    _progressValue = [[UILabel alloc] init];
+    _progressValue.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold];
+    _progressValue.textColor = ATTapColor();
+    _progressValue.textAlignment = NSTextAlignmentRight;
+    [_progressValue setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    UIStackView *progressHeader = [[UIStackView alloc] initWithArrangedSubviews:@[progressTitle, [UIView new], _progressValue]];
+    progressHeader.axis = UILayoutConstraintAxisHorizontal;
+    progressHeader.alignment = UIStackViewAlignmentCenter;
+    progressHeader.spacing = 8;
+
+    _progressBar = [[ATProgressBar alloc] initWithFrame:CGRectZero];
+    _progressBar.translatesAutoresizingMaskIntoConstraints = NO;
+    [_progressBar.heightAnchor constraintEqualToConstant:6].active = YES;
+
+    _progressBox = [[UIStackView alloc] initWithArrangedSubviews:@[progressHeader, _progressBar]];
+    _progressBox.axis = UILayoutConstraintAxisVertical;
+    _progressBox.spacing = 6;
+    _progressBox.hidden = YES;
+
+    UIStackView *section = [[UIStackView alloc] initWithArrangedSubviews:@[_progressBox, _runButton, _statusLabel]];
     section.axis = UILayoutConstraintAxisVertical;
     section.spacing = 8;
+    [section setCustomSpacing:10 afterView:_runButton];
     return section;
 }
 
@@ -1056,13 +1180,35 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 - (void)updateStatus {
     NSUInteger count = _session.actions.count;
+    [self updateProgressWithStepCount:count];
+
     if (_session.running) {
         NSString *loops = _session.loopCount ? [NSString stringWithFormat:@"%ld/%ld", (long)_session.currentLoop, (long)_session.loopCount]
                                              : [NSString stringWithFormat:@"%ld", (long)_session.currentLoop];
         _statusLabel.text = [NSString stringWithFormat:@"第 %@ 轮  ·  第 %ld/%lu 步", loops, (long)_session.currentIndex + 1, (unsigned long)count];
+    } else if (_session.didCompleteLoops) {
+        _statusLabel.text = [NSString stringWithFormat:@"已完成 %ld 轮", (long)_session.loopCount];
     } else {
         _statusLabel.text = count ? @"点悬浮按钮可停止运行" : @"先选点，再点开始";
     }
+}
+
+// 只有「设定了有限循环次数 + 有步骤 + 正在跑或刚跑完」才显示进度，无限循环不占位。
+- (void)updateProgressWithStepCount:(NSUInteger)count {
+    BOOL finite = _session.loopCount > 0;
+    BOOL show = finite && count > 0 && (_session.running || _session.didCompleteLoops);
+    _progressBox.hidden = !show;
+    if (!show) {
+        return;
+    }
+    double value = _session.progress;
+    if (value < 0) {
+        value = 0;
+    }
+    _progressBar.progress = (CGFloat)value;
+    _progressBar.barColor = _session.didCompleteLoops ? ATGoColor() : ATTapColor();
+    _progressValue.textColor = _session.didCompleteLoops ? ATGoColor() : ATTapColor();
+    _progressValue.text = [NSString stringWithFormat:@"%ld%%", (long)lround(value * 100)];
 }
 
 - (void)showMessage:(NSString *)message {

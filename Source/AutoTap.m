@@ -503,6 +503,8 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
 
 - (void)runStateChanged {
     BOOL running = _session.running;
+    // 有限循环时把百分比同步到悬浮球上；无限循环 progress = -1 → 隐藏。
+    _bubble.progressPercent = _session.progress * 100;
     _bubble.running = running;
     [_panel updateRunState];
     for (ATMarkerView *marker in [_markers arrayByAddingObjectsFromArray:_extraMarkers]) {
@@ -597,6 +599,7 @@ static CAShapeLayer *ATArrowLayer(UIColor *color) {
 
 - (void)stepStarted:(NSInteger)index action:(ATAction *)action {
     [_panel highlightStep:index];
+    _bubble.progressPercent = _session.progress * 100;
     for (NSInteger i = 0; i < (NSInteger)_markers.count; i++) {
         _markers[i].active = i == index;
     }

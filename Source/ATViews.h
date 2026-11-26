@@ -31,6 +31,8 @@ UIColor *ATCardColor(void);
 @property (nonatomic, copy, nullable) void (^onTap)(void);
 @property (nonatomic, copy, nullable) void (^onMoved)(CGPoint center);
 @property (nonatomic, getter=isRunning) BOOL running;
+// 有限循环运行中，在球上方显示进度百分比；传负数表示不显示。
+@property (nonatomic) double progressPercent;
 @end
 
 // A numbered, draggable handle marking where a step touches.

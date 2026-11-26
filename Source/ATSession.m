@@ -116,6 +116,7 @@ static NSString *const kFirstPlanName = @"方案 1";
     NSInteger _activePlanIndex;
     NSUInteger _generation; // bumped on stop so pending steps see they are stale
     BOOL _idleTimerWasDisabled;
+    BOOL _didCompleteLoops;
 }
 
 + (ATSession *)shared {
@@ -134,6 +135,8 @@ static NSString *const kFirstPlanName = @"方案 1";
         _swipeDuration = 0.25;
         _loopCount = 0;
         _showTouches = YES;
+        _currentLoop = 1;
+        _didCompleteLoops = NO;
         [self loadSaved];
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationWillResignActive)
@@ -317,6 +320,7 @@ static NSString *ATTrimmedName(NSString *name) {
 }
 
 - (void)changed {
+    _didCompleteLoops = NO; // 步骤变了，之前跑完的 100% 不再成立
     [self save];
     if (self.onChange) {
         self.onChange();
@@ -376,6 +380,24 @@ static NSString *ATTrimmedName(NSString *name) {
 
 #pragma mark Running
 
+- (BOOL)didCompleteLoops {
+    return _didCompleteLoops;
+}
+
+- (double)progress {
+    if (_loopCount <= 0) {
+        return -1; // 无限循环没有百分比
+    }
+    NSInteger count = (NSInteger)self.actions.count;
+    NSInteger total = _loopCount * count;
+    if (total <= 0) {
+        return 0;
+    }
+    NSInteger done = _didCompleteLoops ? total : (_currentLoop - 1) * count + _currentIndex;
+    double value = (double)done / (double)total;
+    return MIN(MAX(value, 0), 1);
+}
+
 - (void)start {
     if (_running || self.actions.count == 0) {
         return;
@@ -383,6 +405,7 @@ static NSString *ATTrimmedName(NSString *name) {
     _running = YES;
     _currentIndex = 0;
     _currentLoop = 1;
+    _didCompleteLoops = NO;
     _idleTimerWasDisabled = [UIApplication sharedApplication].idleTimerDisabled;
     [UIApplication sharedApplication].idleTimerDisabled = YES; // long runs shouldn't lock the screen
     if (self.onRunStateChange) {
@@ -417,6 +440,7 @@ static NSString *ATTrimmedName(NSString *name) {
         _currentIndex = 0;
         _currentLoop++;
         if (_loopCount > 0 && _currentLoop > _loopCount) {
+            _didCompleteLoops = YES;
             [self stop];
             return;
         }
