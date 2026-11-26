@@ -21,9 +21,10 @@ TrollAutoClicker_FILES = Source/Tweak.xm \
                          $(SRC)/ATViews.m \
                          $(VENDOR)/TSPrivateUIKit.m \
                          $(VENDOR)/TSTouchSynthesizer.m \
+                         $(VENDOR)/TSWebTap.m \
                          $(VENDOR)/TSTouchLogic.c
 
-TrollAutoClicker_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore
+TrollAutoClicker_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore WebKit
 TrollAutoClicker_CFLAGS = -fobjc-arc -O2 -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
                           -I$(VENDOR)
 

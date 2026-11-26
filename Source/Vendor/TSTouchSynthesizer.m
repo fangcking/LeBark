@@ -5,6 +5,7 @@
 
 #import "TSPrivateUIKit.h"
 #import "TSTouchLogic.h"
+#import "TSWebTap.h"
 
 static const NSInteger kGestureSearchDepth = 8;
 static const CGFloat kMinimumVisibleAlpha = 0.01;
@@ -44,6 +45,9 @@ static const NSInteger kGestureStateCancelled = 4;
 @property (nonatomic) CGPoint startContentOffset;
 @property (nonatomic) BOOL panActive;
 @property (nonatomic) BOOL movedPastTapSlop;
+// The tap landed on a WKWebView/UIWebView. UIKit touch synthesis does not reach
+// WebKit's click detection, so this tap is served by TSWebTap instead.
+@property (nonatomic) BOOL webPageTap;
 @end
 
 @implementation TSTouchState
@@ -432,6 +436,7 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
     state.panGestures = TSFindGestures(view, [UIPanGestureRecognizer class]);
     state.startPoint = event.point;
     state.startContentOffset = state.scrollView ? state.scrollView.contentOffset : CGPointZero;
+    state.webPageTap = _currentSequenceIsTap && TSWebTapHasTargetAtScreenPoint(event.point);
     _states[@(event.identifier)] = state;
 
     *outWindow = window;
@@ -501,6 +506,20 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
 
 // Port of FUN_00584b84.
 - (void)deliverEvent:(TSTouchEvent *)event state:(TSTouchState *)state window:(UIWindow *)window view:(UIView *)view {
+    // A tap inside a web view never becomes a click through UIKit's touch
+    // pipeline: WebKit resolves taps in its own recognizers, which a synthetic
+    // UITouchesEvent does not drive. Such a tap is served entirely by the DOM
+    // path, and no touch is delivered, so the page cannot see a half gesture.
+    if (state.webPageTap) {
+        if (event.action == TSTouchActionEnded) {
+            TSWebTapAtScreenPoint(event.point);
+        }
+        if (event.action == TSTouchActionEnded || event.action == TSTouchActionCancelled) {
+            [_states removeObjectForKey:@(event.identifier)];
+        }
+        return;
+    }
+
     TSDeliveryOptions options = self.deliveryOptions;
     UITouch *touch = state.touch;
     TSTouchAction action = event.action;
@@ -524,17 +543,13 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
     TSLog(@"action %ld id %ld -> %@ event=%@ dispatched=%d", (long)action, (long)event.identifier,
           NSStringFromClass(object_getClass(view)), uiEvent, dispatched);
 
-    // Controls get touches through sendEvent: only. Everything else gets them
-    // directly as well, because sendEvent: alone does not reliably reach the view.
-    // A tap must reach the view exactly once. sendEvent: already hit-tests and
-    // delivers to the correct view; adding a direct touchesBegan/Ended on top
-    // duplicates the sequence. Native UIControls dedupe via TSTrackedControl,
-    // but WKWebView/WebKit has no such guard and treats the second pair as a
-    // broken gesture, dropping the H5 click entirely. For taps we therefore
-    // rely solely on sendEvent: when it succeeded, and only fall back to direct
-    // delivery if no UIEvent could be built.
+    // Controls get touches through sendEvent: only. Every other view also gets a
+    // direct touchesBegan/Moved/Ended, because sendEvent: alone does not reliably
+    // reach a plain UIView (custom controls, third-party UI). Web pages are
+    // already handled by the DOM path above, so they never reach this point and
+    // cannot receive a duplicated sequence.
     BOOL deliveredDirectly = NO;
-    BOOL shouldDeliverDirect = !state.control && (!_currentSequenceIsTap || !dispatched);
+    BOOL shouldDeliverDirect = !state.control;
     if (shouldDeliverDirect && (options & TSDeliveryDirectTouches)) {
         deliveredDirectly = TSDeliverDirect(touch, view, uiEvent);
     }
@@ -829,6 +844,7 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
     // point, matching what UIKit produces for a real tap. The hold makes the
     // touch measurable so controls and WebKit both register it.
     dispatch_async(dispatch_get_main_queue(), ^{
+        TSWebTapSetVerbose(self.verboseLogging);
         self->_currentSequenceIsTap = YES;
         NSInteger identifier = self->_nextIdentifier++;
         NSUInteger generation = self->_sequenceGeneration;
