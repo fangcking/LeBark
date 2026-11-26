@@ -69,6 +69,22 @@ static UIView *TSFindWebViewAtScreenPoint(CGPoint screenPoint) {
     return nil;
 }
 
+static UIView *TSWebViewAncestor(UIView *view) {
+    Class webViewClass = (Class)objc_getClass("WKWebView");
+    Class legacyClass = (Class)objc_getClass("UIWebView");
+    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
+        if ((webViewClass && [candidate isKindOfClass:webViewClass]) ||
+            (legacyClass && [candidate isKindOfClass:legacyClass])) {
+            return candidate;
+        }
+    }
+    return nil;
+}
+
+BOOL TSViewHasWebViewAncestor(UIView *view) {
+    return TSWebViewAncestor(view) != nil;
+}
+
 // Screen point -> page CSS coordinates. A web view's own bounds are in points,
 // while the DOM works in unzoomed layout units, so undo scrolling and zoom.
 static CGPoint TSCSSPointInWebView(UIView *webView, CGPoint screenPoint) {
@@ -154,11 +170,7 @@ BOOL TSWebTapHasTargetAtScreenPoint(CGPoint screenPoint) {
     return TSFindWebViewAtScreenPoint(screenPoint) != nil;
 }
 
-BOOL TSWebTapAtScreenPoint(CGPoint screenPoint) {
-    UIView *webView = TSFindWebViewAtScreenPoint(screenPoint);
-    if (!webView) {
-        return NO;
-    }
+static BOOL TSWebTapInWebView(UIView *webView, CGPoint screenPoint) {
     CGPoint point = TSCSSPointInWebView(webView, screenPoint);
     NSString *script = TSWebTapScript(point.x, point.y);
 
@@ -182,4 +194,20 @@ BOOL TSWebTapAtScreenPoint(CGPoint screenPoint) {
         return YES;
     }
     return NO;
+}
+
+BOOL TSWebTapFromHitView(UIView *hitView, CGPoint screenPoint) {
+    UIView *webView = TSWebViewAncestor(hitView) ?: TSFindWebViewAtScreenPoint(screenPoint);
+    if (!webView) {
+        return NO;
+    }
+    return TSWebTapInWebView(webView, screenPoint);
+}
+
+BOOL TSWebTapAtScreenPoint(CGPoint screenPoint) {
+    UIView *webView = TSFindWebViewAtScreenPoint(screenPoint);
+    if (!webView) {
+        return NO;
+    }
+    return TSWebTapInWebView(webView, screenPoint);
 }

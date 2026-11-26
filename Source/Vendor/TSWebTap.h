@@ -13,6 +13,15 @@ NS_ASSUME_NONNULL_BEGIN
 // Does not run any script.
 BOOL TSWebTapHasTargetAtScreenPoint(CGPoint screenPoint);
 
+// YES when `view` or one of its ancestors is a WKWebView / UIWebView.
+// The tap path uses this: the hit-tested view is the ground truth, so a tap on
+// an overlay drawn above the page is never turned into a DOM click.
+BOOL TSViewHasWebViewAncestor(UIView *view);
+
+// Dispatches a DOM click at the screen point. The web view is taken from the
+// hit view's ancestor chain, with a point scan as fallback.
+BOOL TSWebTapFromHitView(UIView *hitView, CGPoint screenPoint);
+
 // Resolves the element at the point and dispatches touchstart/touchend plus
 // mousedown/mouseup/click on it. Returns YES when a web view was found and the
 // script was handed off (the DOM result arrives asynchronously).

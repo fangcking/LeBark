@@ -436,7 +436,7 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
     state.panGestures = TSFindGestures(view, [UIPanGestureRecognizer class]);
     state.startPoint = event.point;
     state.startContentOffset = state.scrollView ? state.scrollView.contentOffset : CGPointZero;
-    state.webPageTap = _currentSequenceIsTap && TSWebTapHasTargetAtScreenPoint(event.point);
+    state.webPageTap = _currentSequenceIsTap && TSViewHasWebViewAncestor(view);
     _states[@(event.identifier)] = state;
 
     *outWindow = window;
@@ -512,7 +512,7 @@ static BOOL TSDeliverDirect(UITouch *touch, UIView *view, UIEvent *event) {
     // path, and no touch is delivered, so the page cannot see a half gesture.
     if (state.webPageTap) {
         if (event.action == TSTouchActionEnded) {
-            TSWebTapAtScreenPoint(event.point);
+            TSWebTapFromHitView(view, event.point);
         }
         if (event.action == TSTouchActionEnded || event.action == TSTouchActionCancelled) {
             [_states removeObjectForKey:@(event.identifier)];
