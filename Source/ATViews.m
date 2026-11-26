@@ -9,8 +9,8 @@ static const CGFloat kBubbleSize = 44;
 static const CGFloat kEdgeMargin = 10;
 static const CGFloat kStepRowHeight = 78;
 static const CGFloat kVisibleStepRows = 3.2;
-static const CGFloat kPlanRowHeight = 44;
-static const CGFloat kVisiblePlanRows = 3;
+static const CGFloat kPlanRowHeight = 44;      // 下拉选择行（收起状态）的高度
+static const CGFloat kPlanItemHeight = 40;     // 展开后每一项的高度
 
 // Slider position 0...1 maps exponentially onto seconds, for fine control at the low end.
 static const NSTimeInterval kMinSwipeTime = 0.05, kMaxSwipeTime = 3;
@@ -276,12 +276,18 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     ATGradientButton *_runButton;
     UILabel *_statusLabel;
 
-    // 方案
+    // 方案（下拉选择）
     UILabel *_planCount;
+    UIControl *_planSelector;        // 收起状态下唯一可见的一行，点它展开/收起
+    UILabel *_planNameLabel;         // 当前方案名
+    UILabel *_planDetailLabel;       // 当前方案步数
+    UIImageView *_planChevron;       // ▾ / ▴
+    UIView *_planSeparator;
     UIScrollView *_planScroll;
     UIStackView *_planStack;
-    NSLayoutConstraint *_planHeight;
+    NSLayoutConstraint *_planHeight; // 列表区域高度，收起时为 0
     NSMutableArray<UIView *> *_planRows;
+    BOOL _planExpanded;              // 下拉是否展开
     NSInteger _renamingPlanIndex;   // -1 = 没有在改名
     NSInteger _pendingDeletePlanIndex; // 第一次点垃圾桶时进入待确认
     UITextField *_planNameField;    // 改名输入框，用来抢焦点
@@ -436,20 +442,72 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     box.clipsToBounds = YES;
     box.translatesAutoresizingMaskIntoConstraints = NO;
 
+    // 收起状态只有这一行：当前方案名 + 步数 + ▾，点它展开全部方案。
+    _planNameLabel = [[UILabel alloc] init];
+    _planNameLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    _planNameLabel.textColor = ATTextColor();
+    _planNameLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [_planNameLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [_planNameLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    _planDetailLabel = [[UILabel alloc] init];
+    _planDetailLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
+    _planDetailLabel.textColor = ATMutedTextColor();
+    [_planDetailLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_planDetailLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    _planChevron = [[UIImageView alloc] initWithImage:ATSymbol(@"chevron.down", 13, UIFontWeightBold)];
+    _planChevron.tintColor = ATSecondaryTextColor();
+    _planChevron.contentMode = UIViewContentModeScaleAspectFit;
+    [_planChevron setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    _planSelector = [[UIControl alloc] init];
+    _planSelector.translatesAutoresizingMaskIntoConstraints = NO;
+    [_planSelector addTarget:self action:@selector(planSelectorTapped) forControlEvents:UIControlEventTouchUpInside];
+
+    UIView *selectorSpacer = [[UIView alloc] init];
+    [selectorSpacer setContentHuggingPriority:1 forAxis:UILayoutConstraintAxisHorizontal];
+
+    UIStackView *selectorRow = [[UIStackView alloc] initWithArrangedSubviews:@[_planNameLabel, _planDetailLabel, selectorSpacer, _planChevron]];
+    selectorRow.alignment = UIStackViewAlignmentCenter;
+    selectorRow.spacing = 8;
+    selectorRow.userInteractionEnabled = NO; // 触摸交给外层 UIControl
+    selectorRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [_planSelector addSubview:selectorRow];
+    [NSLayoutConstraint activateConstraints:@[
+        [_planSelector.heightAnchor constraintEqualToConstant:kPlanRowHeight],
+        [selectorRow.topAnchor constraintEqualToAnchor:_planSelector.topAnchor],
+        [selectorRow.bottomAnchor constraintEqualToAnchor:_planSelector.bottomAnchor],
+        [selectorRow.leadingAnchor constraintEqualToAnchor:_planSelector.leadingAnchor constant:12],
+        [selectorRow.trailingAnchor constraintEqualToAnchor:_planSelector.trailingAnchor constant:-12],
+    ]];
+    [box addSubview:_planSelector];
+
+    // 展开后的方案列表。收起时高度为 0，完全不占位。
     _planScroll = [[UIScrollView alloc] init];
     _planScroll.translatesAutoresizingMaskIntoConstraints = NO;
     _planScroll.showsVerticalScrollIndicator = NO;
+    _planScroll.alwaysBounceVertical = NO;
     [box addSubview:_planScroll];
 
     _planStack = [[UIStackView alloc] init];
     _planStack.axis = UILayoutConstraintAxisVertical;
+    _planStack.alignment = UIStackViewAlignmentFill;
     _planStack.translatesAutoresizingMaskIntoConstraints = NO;
     [_planScroll addSubview:_planStack];
 
-    _planHeight = [box.heightAnchor constraintEqualToConstant:kPlanRowHeight];
+    _planSeparator = [[UIView alloc] init];
+    _planSeparator.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_planSeparator.heightAnchor constraintEqualToConstant:0.5].active = YES;
+    [_planStack addArrangedSubview:_planSeparator];
+
+    _planHeight = [_planScroll.heightAnchor constraintEqualToConstant:0];
     [NSLayoutConstraint activateConstraints:@[
         _planHeight,
-        [_planScroll.topAnchor constraintEqualToAnchor:box.topAnchor],
+        [_planSelector.topAnchor constraintEqualToAnchor:box.topAnchor],
+        [_planSelector.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+        [_planSelector.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
+        [_planScroll.topAnchor constraintEqualToAnchor:_planSelector.bottomAnchor],
         [_planScroll.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
         [_planScroll.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
         [_planScroll.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
@@ -473,13 +531,30 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     _planNameField = nil;
 
     NSArray<ATPlan *> *plans = _session.plans;
-    for (NSInteger i = 0; i < (NSInteger)plans.count; i++) {
-        UIView *row = [self rowForPlan:plans[i] index:i];
-        [_planStack addArrangedSubview:row];
-        [_planRows addObject:row];
+    NSInteger active = _session.activePlanIndex;
+    ATPlan *current = (active >= 0 && active < (NSInteger)plans.count) ? plans[active] : plans.firstObject;
+
+    // 改名时一定要展开，否则输入框看不见。
+    if (_renamingPlanIndex >= 0) {
+        _planExpanded = YES;
     }
+
+    _planNameLabel.text = current.name.length ? current.name : @"未命名方案";
+    _planDetailLabel.text = current ? [NSString stringWithFormat:@"%ld 步", (long)current.actions.count] : @"";
     _planCount.text = [NSString stringWithFormat:@"%ld 套", (long)plans.count];
-    _planHeight.constant = MIN(MAX((CGFloat)plans.count, 1), kVisiblePlanRows) * kPlanRowHeight;
+    _planChevron.image = ATSymbol(_planExpanded ? @"chevron.up" : @"chevron.down", 13, UIFontWeightBold);
+
+    if (_planExpanded) {
+        for (NSInteger i = 0; i < (NSInteger)plans.count; i++) {
+            UIView *row = [self rowForPlan:plans[i] index:i];
+            [_planStack addArrangedSubview:row];
+            [_planRows addObject:row];
+        }
+    }
+    // 展开后列表按实际条目撑开，由面板自身的滚动兜住，避免嵌套滚动。
+    _planHeight.constant = _planExpanded
+        ? MAX((CGFloat)plans.count, 1) * kPlanItemHeight
+        : 0;
 
     if (_renamingPlanIndex >= 0 && _planNameField) {
         UITextField *field = _planNameField;
@@ -491,7 +566,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 - (UIView *)rowForPlan:(ATPlan *)plan index:(NSInteger)index {
     UIView *row = [[UIView alloc] init];
-    [row.heightAnchor constraintEqualToConstant:kPlanRowHeight].active = YES;
+    [row.heightAnchor constraintEqualToConstant:kPlanItemHeight].active = YES;
 
     // 改名状态：名字变成输入框，右侧给一个确认按钮。
     if (index == _renamingPlanIndex) {
@@ -1095,18 +1170,33 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 
 #pragma mark 方案操作
 
+- (void)planSelectorTapped {
+    _planExpanded = !_planExpanded;
+    _pendingDeletePlanIndex = -1;
+    if (!_planExpanded) {
+        _renamingPlanIndex = -1;
+    }
+    [self reloadPlans];
+    if (_planExpanded) {
+        [_planScroll setContentOffset:CGPointZero animated:NO];
+    }
+}
+
 - (void)addPlanTapped {
     [_session createPlanNamed:nil];
     _pendingDeletePlanIndex = -1;
+    _planExpanded = YES;
     // 新建后直接进入改名，省一次点击。
     _renamingPlanIndex = _session.activePlanIndex;
     [self reloadPlans];
+    [_planScroll setContentOffset:CGPointZero animated:NO];
     [_stepsScroll setContentOffset:CGPointZero animated:NO];
 }
 
 - (void)selectPlanTapped:(UIButton *)button {
     _pendingDeletePlanIndex = -1;
     _renamingPlanIndex = -1;
+    _planExpanded = NO;
     [_session selectPlanAtIndex:button.tag];
     [self reloadPlans];
 }
@@ -1147,6 +1237,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     NSInteger index = button.tag - 9000;
     UITextField *field = _planNameField;
     _renamingPlanIndex = -1;
+    _planExpanded = NO; // 改完名收起，回到紧凑状态
     if (field && index >= 0) {
         if (![_session renamePlanAtIndex:index toName:field.text]) {
             [self showMessage:@"方案名不能为空"];
