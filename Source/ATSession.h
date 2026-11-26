@@ -20,11 +20,23 @@ typedef NS_ENUM(NSInteger, ATActionType) {
 + (instancetype)swipeFrom:(CGPoint)start to:(CGPoint)end;
 @end
 
+// 一套连点方案：一个自定义名字 + 一串步骤。方案之间互相独立。
+@interface ATPlan : NSObject
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, readonly) NSArray<ATAction *> *actions;
++ (instancetype)planWithName:(NSString *)name;
+@end
+
 @interface ATSession : NSObject
 
 @property (class, nonatomic, readonly) ATSession *shared;
 
+// 当前方案的步骤。切换方案后这个数组会变。
 @property (nonatomic, readonly) NSArray<ATAction *> *actions;
+// 所有方案，至少一套。
+@property (nonatomic, readonly) NSArray<ATPlan *> *plans;
+@property (nonatomic, readonly) ATPlan *activePlan;
+@property (nonatomic, readonly) NSInteger activePlanIndex;
 @property (nonatomic) NSTimeInterval swipeDuration; // finger travel time（滑动动作本身的时长）
 @property (nonatomic) NSInteger loopCount;          // 0 repeats forever
 @property (nonatomic) BOOL showTouches;
@@ -51,6 +63,17 @@ typedef NS_ENUM(NSInteger, ATActionType) {
 - (BOOL)moveActionAtIndex:(NSInteger)index byOffset:(NSInteger)offset;
 // Call after moving an action's points in place (e.g. while dragging a marker).
 - (void)actionsDidChange;
+
+#pragma mark 方案
+
+// 新建一套空方案并切换过去。名字为空时自动编号，重名会自动加后缀。
+- (ATPlan *)createPlanNamed:(nullable NSString *)name;
+// 改名。名字为空会被忽略。重名会自动加后缀。返回是否改了。
+- (BOOL)renamePlanAtIndex:(NSInteger)index toName:(NSString *)name;
+// 删除一套方案。只剩一套时拒绝删除。
+- (BOOL)removePlanAtIndex:(NSInteger)index;
+// 把某套方案设为当前方案（会先停止运行）。
+- (void)selectPlanAtIndex:(NSInteger)index;
 
 - (void)start;
 - (void)stop;

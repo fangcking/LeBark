@@ -9,6 +9,8 @@ static const CGFloat kBubbleSize = 44;
 static const CGFloat kEdgeMargin = 10;
 static const CGFloat kStepRowHeight = 78;
 static const CGFloat kVisibleStepRows = 3.2;
+static const CGFloat kPlanRowHeight = 44;
+static const CGFloat kVisiblePlanRows = 3;
 
 // Slider position 0...1 maps exponentially onto seconds, for fine control at the low end.
 static const NSTimeInterval kMinSwipeTime = 0.05, kMaxSwipeTime = 3;
@@ -273,6 +275,16 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     UISwitch *_touchesSwitch;
     ATGradientButton *_runButton;
     UILabel *_statusLabel;
+
+    // 方案
+    UILabel *_planCount;
+    UIScrollView *_planScroll;
+    UIStackView *_planStack;
+    NSLayoutConstraint *_planHeight;
+    NSMutableArray<UIView *> *_planRows;
+    NSInteger _renamingPlanIndex;   // -1 = 没有在改名
+    NSInteger _pendingDeletePlanIndex; // 第一次点垃圾桶时进入待确认
+    UITextField *_planNameField;    // 改名输入框，用来抢焦点
 }
 
 - (instancetype)initWithSession:(ATSession *)session {
@@ -280,7 +292,10 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
         _session = session;
         _rows = [NSMutableArray array];
         _delayFields = [NSMutableArray array];
+        _planRows = [NSMutableArray array];
         _highlighted = -1;
+        _renamingPlanIndex = -1;
+        _pendingDeletePlanIndex = -1;
         self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         self.layer.shadowColor = [UIColor blackColor].CGColor;
         self.layer.shadowOpacity = 0.45;
@@ -335,6 +350,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     ]];
 
     [_stack addArrangedSubview:[self headerView]];
+    [_stack addArrangedSubview:[self planSection]];
     [_stack addArrangedSubview:[self stepsSection]];
     [_stack addArrangedSubview:[self editButtons]];
     [_stack addArrangedSubview:[self timingSection]];
@@ -393,6 +409,193 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     }];
     return label;
 }
+
+#pragma mark 方案
+
+- (UIView *)planSection {
+    _planCount = [[UILabel alloc] init];
+    _planCount.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold];
+    _planCount.textColor = ATSecondaryTextColor();
+    [_planCount setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    UIButton *add = [UIButton buttonWithType:UIButtonTypeSystem];
+    [add setImage:ATSymbol(@"plus.circle.fill", 21, UIFontWeightSemibold) forState:UIControlStateNormal];
+    add.tintColor = ATGoColor();
+    [add addTarget:self action:@selector(addPlanTapped) forControlEvents:UIControlEventTouchUpInside];
+    [add.widthAnchor constraintEqualToConstant:26].active = YES;
+    [add.heightAnchor constraintEqualToConstant:26].active = YES;
+
+    UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[[self sectionLabel:@"方案"], [UIView new], _planCount, add]];
+    header.alignment = UIStackViewAlignmentCenter;
+    header.spacing = 6;
+
+    UIView *box = [[UIView alloc] init];
+    box.backgroundColor = ATCardColor();
+    box.layer.cornerRadius = 16;
+    box.layer.cornerCurve = kCACornerCurveContinuous;
+    box.clipsToBounds = YES;
+    box.translatesAutoresizingMaskIntoConstraints = NO;
+
+    _planScroll = [[UIScrollView alloc] init];
+    _planScroll.translatesAutoresizingMaskIntoConstraints = NO;
+    _planScroll.showsVerticalScrollIndicator = NO;
+    [box addSubview:_planScroll];
+
+    _planStack = [[UIStackView alloc] init];
+    _planStack.axis = UILayoutConstraintAxisVertical;
+    _planStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [_planScroll addSubview:_planStack];
+
+    _planHeight = [box.heightAnchor constraintEqualToConstant:kPlanRowHeight];
+    [NSLayoutConstraint activateConstraints:@[
+        _planHeight,
+        [_planScroll.topAnchor constraintEqualToAnchor:box.topAnchor],
+        [_planScroll.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
+        [_planScroll.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+        [_planScroll.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
+        [_planStack.topAnchor constraintEqualToAnchor:_planScroll.contentLayoutGuide.topAnchor],
+        [_planStack.bottomAnchor constraintEqualToAnchor:_planScroll.contentLayoutGuide.bottomAnchor],
+        [_planStack.leadingAnchor constraintEqualToAnchor:_planScroll.frameLayoutGuide.leadingAnchor],
+        [_planStack.trailingAnchor constraintEqualToAnchor:_planScroll.frameLayoutGuide.trailingAnchor],
+    ]];
+
+    UIStackView *section = [[UIStackView alloc] initWithArrangedSubviews:@[header, box]];
+    section.axis = UILayoutConstraintAxisVertical;
+    section.spacing = 8;
+    return section;
+}
+
+- (void)reloadPlans {
+    for (UIView *row in _planRows) {
+        [row removeFromSuperview];
+    }
+    [_planRows removeAllObjects];
+    _planNameField = nil;
+
+    NSArray<ATPlan *> *plans = _session.plans;
+    for (NSInteger i = 0; i < (NSInteger)plans.count; i++) {
+        UIView *row = [self rowForPlan:plans[i] index:i];
+        [_planStack addArrangedSubview:row];
+        [_planRows addObject:row];
+    }
+    _planCount.text = [NSString stringWithFormat:@"%ld 套", (long)plans.count];
+    _planHeight.constant = MIN(MAX((CGFloat)plans.count, 1), kVisiblePlanRows) * kPlanRowHeight;
+
+    if (_renamingPlanIndex >= 0 && _planNameField) {
+        UITextField *field = _planNameField;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [field becomeFirstResponder];
+        });
+    }
+}
+
+- (UIView *)rowForPlan:(ATPlan *)plan index:(NSInteger)index {
+    UIView *row = [[UIView alloc] init];
+    [row.heightAnchor constraintEqualToConstant:kPlanRowHeight].active = YES;
+
+    // 改名状态：名字变成输入框，右侧给一个确认按钮。
+    if (index == _renamingPlanIndex) {
+        UITextField *field = [[UITextField alloc] init];
+        field.text = plan.name;
+        field.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        field.textColor = ATTextColor();
+        field.tintColor = ATTapColor();
+        field.borderStyle = UITextBorderStyleNone;
+        field.returnKeyType = UIReturnKeyDone;
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+        field.delegate = self;
+        field.tag = 9000 + index;
+        _planNameField = field;
+
+        UIButton *done = [UIButton buttonWithType:UIButtonTypeSystem];
+        [done setImage:ATSymbol(@"checkmark.circle.fill", 20, UIFontWeightSemibold) forState:UIControlStateNormal];
+        done.tintColor = ATGoColor();
+        done.tag = 9000 + index;
+        [done addTarget:self action:@selector(planRenameDone:) forControlEvents:UIControlEventTouchUpInside];
+        [done.widthAnchor constraintEqualToConstant:26].active = YES;
+
+        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[field, done]];
+        stack.alignment = UIStackViewAlignmentCenter;
+        stack.spacing = 6;
+        stack.layoutMargins = UIEdgeInsetsMake(0, 12, 0, 10);
+        stack.layoutMarginsRelativeArrangement = YES;
+        stack.translatesAutoresizingMaskIntoConstraints = NO;
+        [row addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [stack.topAnchor constraintEqualToAnchor:row.topAnchor],
+            [stack.bottomAnchor constraintEqualToAnchor:row.bottomAnchor],
+            [stack.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+            [stack.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+        ]];
+        return row;
+    }
+
+    BOOL active = index == _session.activePlanIndex;
+
+    UIButton *select = [UIButton buttonWithType:UIButtonTypeSystem];
+    [select setImage:ATSymbol(active ? @"checkmark.circle.fill" : @"circle", 19, UIFontWeightSemibold)
+            forState:UIControlStateNormal];
+    select.tintColor = active ? ATTapColor() : ATMutedTextColor();
+    select.tag = index;
+    [select addTarget:self action:@selector(selectPlanTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [select.widthAnchor constraintEqualToConstant:24].active = YES;
+
+    UIButton *name = [UIButton buttonWithType:UIButtonTypeSystem];
+    [name setTitle:plan.name forState:UIControlStateNormal];
+    name.titleLabel.font = [UIFont systemFontOfSize:15 weight:(active ? UIFontWeightSemibold : UIFontWeightMedium)];
+    [name setTitleColor:(active ? ATTextColor() : ATSecondaryTextColor()) forState:UIControlStateNormal];
+    name.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    name.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    name.tag = index;
+    [name addTarget:self action:@selector(selectPlanTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [name setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [name setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+
+    UILabel *steps = [[UILabel alloc] init];
+    steps.text = [NSString stringWithFormat:@"%ld 步", (long)plan.actions.count];
+    steps.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
+    steps.textColor = ATMutedTextColor();
+    [steps setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    UIButton *pencil = [UIButton buttonWithType:UIButtonTypeSystem];
+    [pencil setImage:ATSymbol(@"pencil", 15, UIFontWeightSemibold) forState:UIControlStateNormal];
+    pencil.tintColor = ATMutedTextColor();
+    pencil.tag = index;
+    [pencil addTarget:self action:@selector(renamePlanTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [pencil.widthAnchor constraintEqualToConstant:26].active = YES;
+
+    // 第一次点垃圾桶变成「确认」，3 秒内不点自动撤回，避免误删。
+    BOOL confirming = index == _pendingDeletePlanIndex;
+    UIButton *trash = [UIButton buttonWithType:UIButtonTypeSystem];
+    trash.tag = index;
+    [trash addTarget:self action:@selector(removePlanTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [trash.widthAnchor constraintEqualToConstant:(confirming ? 40 : 26)].active = YES;
+    if (confirming) {
+        [trash setTitle:@"确认" forState:UIControlStateNormal];
+        trash.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+        [trash setTitleColor:ATStopColor() forState:UIControlStateNormal];
+    } else {
+        [trash setImage:ATSymbol(@"trash", 16, UIFontWeightSemibold) forState:UIControlStateNormal];
+        trash.tintColor = ATMutedTextColor();
+    }
+
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[select, name, steps, pencil, trash]];
+    stack.alignment = UIStackViewAlignmentCenter;
+    stack.spacing = 8;
+    stack.layoutMargins = UIEdgeInsetsMake(0, 12, 0, 10);
+    stack.layoutMarginsRelativeArrangement = YES;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [row addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:row.topAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:row.bottomAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+    ]];
+    return row;
+}
+
+#pragma mark Steps
 
 - (UIView *)stepsSection {
     _stepsCount = [[UILabel alloc] init];
@@ -731,6 +934,7 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     }
     [_rows removeAllObjects];
     [_delayFields removeAllObjects];
+    [self reloadPlans];
     NSArray<ATAction *> *actions = _session.actions;
     NSInteger taps = 0;
     for (NSInteger i = 0; i < (NSInteger)actions.count; i++) {
@@ -841,7 +1045,24 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
 }
 
 - (void)textFieldDidEndEditing:(UITextField *)textField {
+    // 方案改名框：失焦即保存，名字为空则保留原名。
+    // 不管当前是不是改名状态都保存，避免切换/重排把这个框拆掉时丢掉刚输入的名字。
+    if (textField.tag >= 9000) {
+        NSInteger index = textField.tag - 9000;
+        if (_renamingPlanIndex == index) {
+            _renamingPlanIndex = -1;
+        }
+        [_session renamePlanAtIndex:index toName:textField.text];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self reloadPlans];
+        });
+    }
     [[NSNotificationCenter defaultCenter] postNotificationName:ATOverlayKeyboardDidHideNotification object:self];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [textField resignFirstResponder];
+    return YES;
 }
 
 - (void)sliderChanged:(UISlider *)slider {
@@ -870,6 +1091,69 @@ static NSString *ATFormatSeconds(NSTimeInterval seconds) {
     if (self.onTouchesChanged) {
         self.onTouchesChanged(_touchesSwitch.on);
     }
+}
+
+#pragma mark 方案操作
+
+- (void)addPlanTapped {
+    [_session createPlanNamed:nil];
+    _pendingDeletePlanIndex = -1;
+    // 新建后直接进入改名，省一次点击。
+    _renamingPlanIndex = _session.activePlanIndex;
+    [self reloadPlans];
+    [_stepsScroll setContentOffset:CGPointZero animated:NO];
+}
+
+- (void)selectPlanTapped:(UIButton *)button {
+    _pendingDeletePlanIndex = -1;
+    _renamingPlanIndex = -1;
+    [_session selectPlanAtIndex:button.tag];
+    [self reloadPlans];
+}
+
+- (void)renamePlanTapped:(UIButton *)button {
+    _pendingDeletePlanIndex = -1;
+    _renamingPlanIndex = button.tag;
+    [self reloadPlans];
+}
+
+- (void)removePlanTapped:(UIButton *)button {
+    NSInteger index = button.tag;
+    NSArray<ATPlan *> *plans = _session.plans;
+    if (index < 0 || index >= (NSInteger)plans.count) {
+        return;
+    }
+    if (plans.count <= 1) {
+        [self showMessage:@"至少保留一套方案"];
+        return;
+    }
+    if (_pendingDeletePlanIndex != index) {
+        _pendingDeletePlanIndex = index;
+        [self reloadPlans];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self->_pendingDeletePlanIndex == index) {
+                self->_pendingDeletePlanIndex = -1;
+                [self reloadPlans];
+            }
+        });
+        return;
+    }
+    _pendingDeletePlanIndex = -1;
+    [_session removePlanAtIndex:index];
+    [self reloadPlans];
+}
+
+- (void)planRenameDone:(UIButton *)button {
+    NSInteger index = button.tag - 9000;
+    UITextField *field = _planNameField;
+    _renamingPlanIndex = -1;
+    if (field && index >= 0) {
+        if (![_session renamePlanAtIndex:index toName:field.text]) {
+            [self showMessage:@"方案名不能为空"];
+        }
+    }
+    [field resignFirstResponder];
+    [self reloadPlans];
 }
 
 - (void)recordTapped {

@@ -5,6 +5,9 @@
 static NSString *const kDefaultsKey = @"com.trollautoclicker.v1";
 static const NSTimeInterval kTapHoldTime = 0.05;
 static const NSInteger kDefaultDelayMs = 500;
+static NSString *const kFirstPlanName = @"方案 1";
+
+#pragma mark - ATAction
 
 @interface ATAction ()
 - (NSDictionary *)dictionary;
@@ -55,8 +58,62 @@ static const NSInteger kDefaultDelayMs = 500;
 
 @end
 
+#pragma mark - ATPlan
+
+@interface ATPlan ()
+@property (nonatomic, strong) NSMutableArray<ATAction *> *mutableActions;
+- (NSDictionary *)dictionary;
++ (nullable instancetype)planWithDictionary:(NSDictionary *)dictionary;
+@end
+
+@implementation ATPlan
+
++ (instancetype)planWithName:(NSString *)name {
+    ATPlan *plan = [[self alloc] init];
+    plan.name = name.length ? name : kFirstPlanName;
+    plan.mutableActions = [NSMutableArray array];
+    return plan;
+}
+
+- (NSArray<ATAction *> *)actions {
+    return [self.mutableActions copy];
+}
+
+- (NSDictionary *)dictionary {
+    NSMutableArray *actions = [NSMutableArray array];
+    for (ATAction *action in self.mutableActions) {
+        [actions addObject:[action dictionary]];
+    }
+    return @{
+        @"name": self.name ?: kFirstPlanName,
+        @"actions": actions,
+    };
+}
+
++ (nullable instancetype)planWithDictionary:(NSDictionary *)dictionary {
+    if (![dictionary isKindOfClass:[NSDictionary class]]) {
+        return nil;
+    }
+    ATPlan *plan = [[self alloc] init];
+    NSString *name = [dictionary[@"name"] isKindOfClass:[NSString class]] ? dictionary[@"name"] : nil;
+    plan.name = name.length ? name : kFirstPlanName;
+    plan.mutableActions = [NSMutableArray array];
+    for (NSDictionary *item in dictionary[@"actions"]) {
+        ATAction *action = [ATAction actionWithDictionary:item];
+        if (action) {
+            [plan.mutableActions addObject:action];
+        }
+    }
+    return plan;
+}
+
+@end
+
+#pragma mark - ATSession
+
 @implementation ATSession {
-    NSMutableArray<ATAction *> *_actions;
+    NSMutableArray<ATPlan *> *_plans;
+    NSInteger _activePlanIndex;
     NSUInteger _generation; // bumped on stop so pending steps see they are stale
     BOOL _idleTimerWasDisabled;
 }
@@ -72,7 +129,8 @@ static const NSInteger kDefaultDelayMs = 500;
 
 - (instancetype)init {
     if ((self = [super init])) {
-        _actions = [NSMutableArray array];
+        _plans = [NSMutableArray array];
+        _activePlanIndex = 0;
         _swipeDuration = 0.25;
         _loopCount = 0;
         _showTouches = YES;
@@ -85,8 +143,114 @@ static const NSInteger kDefaultDelayMs = 500;
     return self;
 }
 
+#pragma mark 方案
+
+- (NSArray<ATPlan *> *)plans {
+    return [_plans copy];
+}
+
+- (ATPlan *)activePlan {
+    if (_plans.count == 0) {
+        [_plans addObject:[ATPlan planWithName:kFirstPlanName]];
+        _activePlanIndex = 0;
+    }
+    NSInteger index = MIN(MAX(_activePlanIndex, 0), (NSInteger)_plans.count - 1);
+    _activePlanIndex = index;
+    return _plans[index];
+}
+
+- (NSInteger)activePlanIndex {
+    // 通过 activePlan 走一遍，保证索引和数组一致。
+    (void)[self activePlan];
+    return _activePlanIndex;
+}
+
 - (NSArray<ATAction *> *)actions {
-    return [_actions copy];
+    return [self activePlan].actions;
+}
+
+// 当前方案的可变步骤数组。所有编辑都作用在它上面。
+- (NSMutableArray<ATAction *> *)currentActions {
+    return [self activePlan].mutableActions;
+}
+
+static NSString *ATTrimmedName(NSString *name) {
+    if (![name isKindOfClass:[NSString class]]) {
+        return @"";
+    }
+    return [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+// 重名时依次尝试 "名字 2"、"名字 3"……
+- (NSString *)uniquePlanName:(NSString *)base excludingIndex:(NSInteger)exclude {
+    NSString *candidate = base;
+    NSInteger suffix = 2;
+    while (YES) {
+        BOOL taken = NO;
+        for (NSInteger i = 0; i < (NSInteger)_plans.count; i++) {
+            if (i == exclude) {
+                continue;
+            }
+            if ([_plans[i].name isEqualToString:candidate]) {
+                taken = YES;
+                break;
+            }
+        }
+        if (!taken) {
+            return candidate;
+        }
+        candidate = [NSString stringWithFormat:@"%@ %ld", base, (long)suffix++];
+    }
+}
+
+- (ATPlan *)createPlanNamed:(nullable NSString *)name {
+    [self stop];
+    NSString *trimmed = ATTrimmedName(name);
+    if (!trimmed.length) {
+        trimmed = [NSString stringWithFormat:@"方案 %ld", (long)_plans.count + 1];
+    }
+    ATPlan *plan = [ATPlan planWithName:[self uniquePlanName:trimmed excludingIndex:-1]];
+    [_plans addObject:plan];
+    _activePlanIndex = (NSInteger)_plans.count - 1;
+    [self changed];
+    return plan;
+}
+
+- (BOOL)renamePlanAtIndex:(NSInteger)index toName:(NSString *)name {
+    if (index < 0 || index >= (NSInteger)_plans.count) {
+        return NO;
+    }
+    NSString *trimmed = ATTrimmedName(name);
+    if (!trimmed.length) {
+        return NO;
+    }
+    _plans[index].name = [self uniquePlanName:trimmed excludingIndex:index];
+    [self save];
+    return YES;
+}
+
+- (BOOL)removePlanAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)_plans.count || _plans.count <= 1) {
+        return NO;
+    }
+    [self stop];
+    [_plans removeObjectAtIndex:index];
+    if (index < _activePlanIndex) {
+        _activePlanIndex--;
+    } else if (_activePlanIndex >= (NSInteger)_plans.count) {
+        _activePlanIndex = (NSInteger)_plans.count - 1;
+    }
+    [self changed];
+    return YES;
+}
+
+- (void)selectPlanAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)_plans.count || index == _activePlanIndex) {
+        return;
+    }
+    [self stop];
+    _activePlanIndex = index;
+    [self changed];
 }
 
 #pragma mark Persistence
@@ -96,25 +260,54 @@ static const NSInteger kDefaultDelayMs = 500;
     if (!saved) {
         return;
     }
-    for (NSDictionary *item in saved[@"actions"]) {
-        ATAction *action = [ATAction actionWithDictionary:item];
-        if (action) {
-            [_actions addObject:action];
+    // 新格式：多套方案。
+    NSArray *rawPlans = saved[@"plans"];
+    if ([rawPlans isKindOfClass:[NSArray class]] && rawPlans.count > 0) {
+        for (NSDictionary *item in rawPlans) {
+            ATPlan *plan = [ATPlan planWithDictionary:item];
+            if (plan) {
+                [_plans addObject:plan];
+            }
         }
+        if (_plans.count > 0) {
+            NSInteger index = [saved[@"activePlanIndex"] integerValue];
+            _activePlanIndex = MIN(MAX(index, 0), (NSInteger)_plans.count - 1);
+        }
+    }
+    // 老格式：只有一串步骤，迁移成一套「方案 1」。
+    if (_plans.count == 0 && [saved[@"actions"] isKindOfClass:[NSArray class]]) {
+        ATPlan *plan = [ATPlan planWithName:kFirstPlanName];
+        for (NSDictionary *item in saved[@"actions"]) {
+            ATAction *action = [ATAction actionWithDictionary:item];
+            if (action) {
+                [plan.mutableActions addObject:action];
+            }
+        }
+        [_plans addObject:plan];
+        _activePlanIndex = 0;
     }
     if (saved[@"swipeDuration"]) _swipeDuration = [saved[@"swipeDuration"] doubleValue];
     if (saved[@"loopCount"]) _loopCount = [saved[@"loopCount"] integerValue];
     if (saved[@"showTouches"]) _showTouches = [saved[@"showTouches"] boolValue];
     if (saved[@"bubbleX"]) _bubbleCenter = CGPointMake([saved[@"bubbleX"] doubleValue], [saved[@"bubbleY"] doubleValue]);
+    (void)[self activePlan];
 }
 
 - (void)save {
-    NSMutableArray *actions = [NSMutableArray array];
-    for (ATAction *action in _actions) {
-        [actions addObject:[action dictionary]];
+    (void)[self activePlan]; // 至少保证有一套方案再落盘
+    NSMutableArray *plans = [NSMutableArray array];
+    for (ATPlan *plan in _plans) {
+        [plans addObject:[plan dictionary]];
+    }
+    // 老版本读的是顶层 actions：同步写一份，降级安装时也不会丢点位。
+    NSMutableArray *legacyActions = [NSMutableArray array];
+    for (ATAction *action in [self activePlan].actions) {
+        [legacyActions addObject:[action dictionary]];
     }
     [[NSUserDefaults standardUserDefaults] setObject:@{
-        @"actions": actions,
+        @"plans": plans,
+        @"activePlanIndex": @(_activePlanIndex),
+        @"actions": legacyActions,
         @"swipeDuration": @(_swipeDuration),
         @"loopCount": @(_loopCount),
         @"showTouches": @(_showTouches),
@@ -139,39 +332,41 @@ static const NSInteger kDefaultDelayMs = 500;
 
 - (void)addAction:(ATAction *)action {
     [self stop];
-    [_actions addObject:action];
+    [[self currentActions] addObject:action];
     [self changed];
 }
 
 - (void)removeActionAtIndex:(NSInteger)index {
-    if (index < 0 || index >= (NSInteger)_actions.count) {
+    NSMutableArray<ATAction *> *actions = [self currentActions];
+    if (index < 0 || index >= (NSInteger)actions.count) {
         return;
     }
     [self stop];
-    [_actions removeObjectAtIndex:index];
+    [actions removeObjectAtIndex:index];
     [self changed];
 }
 
 - (void)removeLastAction {
-    [self removeActionAtIndex:(NSInteger)_actions.count - 1];
+    [self removeActionAtIndex:(NSInteger)[self currentActions].count - 1];
 }
 
 - (BOOL)moveActionAtIndex:(NSInteger)index byOffset:(NSInteger)offset {
+    NSMutableArray<ATAction *> *actions = [self currentActions];
     NSInteger target = index + offset;
-    if (index < 0 || index >= (NSInteger)_actions.count || target < 0 || target >= (NSInteger)_actions.count) {
+    if (index < 0 || index >= (NSInteger)actions.count || target < 0 || target >= (NSInteger)actions.count) {
         return NO;
     }
     [self stop];
-    ATAction *action = _actions[index];
-    [_actions removeObjectAtIndex:index];
-    [_actions insertObject:action atIndex:target];
+    ATAction *action = actions[index];
+    [actions removeObjectAtIndex:index];
+    [actions insertObject:action atIndex:target];
     [self changed];
     return YES;
 }
 
 - (void)removeAllActions {
     [self stop];
-    [_actions removeAllObjects];
+    [[self currentActions] removeAllObjects];
     [self changed];
 }
 
@@ -182,7 +377,7 @@ static const NSInteger kDefaultDelayMs = 500;
 #pragma mark Running
 
 - (void)start {
-    if (_running || _actions.count == 0) {
+    if (_running || self.actions.count == 0) {
         return;
     }
     _running = YES;
@@ -217,7 +412,8 @@ static const NSInteger kDefaultDelayMs = 500;
     if (generation != _generation || !_running) {
         return;
     }
-    if (_currentIndex >= (NSInteger)_actions.count) {
+    NSArray<ATAction *> *actions = self.actions;
+    if (_currentIndex >= (NSInteger)actions.count) {
         _currentIndex = 0;
         _currentLoop++;
         if (_loopCount > 0 && _currentLoop > _loopCount) {
@@ -226,7 +422,7 @@ static const NSInteger kDefaultDelayMs = 500;
         }
     }
     NSInteger index = _currentIndex;
-    ATAction *action = _actions[index];
+    ATAction *action = actions[index];
     if (self.onStepStart) {
         self.onStepStart(index, action);
     }
